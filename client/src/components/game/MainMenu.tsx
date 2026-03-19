@@ -171,20 +171,18 @@ export function MainMenu({
             </Button>
           )}
 
-{
-  onStartGrudgeFighter && (
-    <Button
-              onClick={ onStartGrudgeFighter }
-  variant = "secondary"
-  size = "lg"
-  className = "w-full h-12 font-serif bg-amber-600/80 hover:bg-amber-500/80 text-slate-950 border-amber-300/30"
-  data - testid="button-start-grudge-fighter"
-    >
-    <Swords className="w-5 h-5 mr-2" />
-      Grudge Fighter(2D)
-        </Button>
-          )
-}
+          {onStartGrudgeFighter && (
+            <Button
+              onClick={onStartGrudgeFighter}
+              variant="secondary"
+              size="lg"
+              className="w-full h-12 font-serif bg-amber-600/80 hover:bg-amber-500/80 text-slate-950 border-amber-300/30"
+              data-testid="button-start-grudge-fighter"
+            >
+              <Swords className="w-5 h-5 mr-2" />
+              Grudge Fighter (2D)
+            </Button>
+          )}
 
           {onViewAdmin && (
             <Button

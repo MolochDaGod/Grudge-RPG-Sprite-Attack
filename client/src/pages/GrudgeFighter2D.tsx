@@ -867,139 +867,132 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     }, [hud.winner]);
 
     return (
-        <div className= "min-h-screen bg-slate-950 text-white p-4 md:p-6" >
-        <div className="max-w-[1300px] mx-auto space-y-4" >
-            <div className="flex flex-wrap items-center justify-between gap-3" >
-                <Button
-            variant="ghost"
-    className = "text-white/80 hover:text-white hover:bg-white/10"
-    onClick = { onBack }
-    data - testid="button-back-from-grudge-fighter"
-        >
-        <ArrowLeft className="w-4 h-4 mr-2" />
-            Back To Menu
-                </Button>
+        <div className="min-h-screen bg-slate-950 text-white p-4 md:p-6">
+            <div className="max-w-[1300px] mx-auto space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <Button
+                        variant="ghost"
+                        className="text-white/80 hover:text-white hover:bg-white/10"
+                        onClick={onBack}
+                        data-testid="button-back-from-grudge-fighter"
+                    >
+                        <ArrowLeft className="w-4 h-4 mr-2" />
+                        Back To Menu
+                    </Button>
 
-                < div className = "flex items-center gap-2" >
-                    <Badge className="bg-amber-500/20 text-amber-300 border-amber-300/30" >
-                        Grudge Fighter Mode
-                            </Badge>
-                            < Badge variant = "outline" className = "border-white/30 text-white/90" >
-                                Match Time { formatTime(hud.elapsed) }
-    </Badge>
-        </div>
+                    <div className="flex items-center gap-2">
+                        <Badge className="bg-amber-500/20 text-amber-300 border-amber-300/30">
+                            Grudge Fighter Mode
+                        </Badge>
+                        <Badge variant="outline" className="border-white/30 text-white/90">
+                            Match Time {formatTime(hud.elapsed)}
+                        </Badge>
+                    </div>
 
-        < Button onClick = { resetMatch } variant = "secondary" data - testid="button-reset-grudge-fighter" >
-            Rematch
-            </Button>
-            </div>
+                    <Button onClick={resetMatch} variant="secondary" data-testid="button-reset-grudge-fighter">
+                        Rematch
+                    </Button>
+                </div>
 
-    {
-        loadError && (
-            <Card className="p-4 bg-red-950/70 border-red-500/40 text-red-100" >
-                Could not load fighter assets: { loadError }
-        </Card>
-        )
-    }
+                {loadError && (
+                    <Card className="p-4 bg-red-950/70 border-red-500/40 text-red-100">
+                        Could not load fighter assets: {loadError}
+                    </Card>
+                )}
 
-    <Card className="relative overflow-hidden border-white/10 bg-slate-900/80" >
-        <div className="p-4 border-b border-white/10 flex flex-wrap items-center gap-4 justify-between" >
-            <div className="min-w-[260px]" >
-                <div className="text-sm text-white/70 mb-1" > Player 1: { roninMoveSet.name } </div>
-                    < div className = "grid grid-cols-10 gap-1" >
-                    {
-                        Array.from({ length: 10 }, (_, idx) => (
-                            <div
-                    key= {`p1-hp-${idx}`}
-    className = {`h-3 rounded-sm ${idx < Math.ceil(hud.p1Hp / 10) ? "bg-emerald-500" : "bg-white/10"}`
-}
-                  />
-                ))}
-</div>
-    </div>
-
-    < div className = "min-w-[260px]" >
-        <div className="text-sm text-white/70 mb-1 text-right" > Player 2: { assassinMoveSet.name } </div>
-            < div className = "grid grid-cols-10 gap-1" >
-            {
-                Array.from({ length: 10 }, (_, idx) => (
-                    <div
-                    key= {`p2-hp-${idx}`}
-className = {`h-3 rounded-sm ${idx < Math.ceil(hud.p2Hp / 10) ? "bg-sky-400" : "bg-white/10"}`}
-                  />
-                ))}
-</div>
-    </div>
-    </div>
-
-    < canvas
-ref = { canvasRef }
-width = { ARENA_WIDTH }
-height = { ARENA_HEIGHT }
-className = "w-full h-auto max-h-[70vh] block bg-black"
-data - testid="grudge-fighter-canvas"
-    />
-
-    {!isReady && !loadError && (
-        <div className="absolute inset-0 bg-black/60 grid place-items-center text-white/80 text-lg" >
-            Loading sprites and animation sheets...
-</div>
-          )}
-
-{
-    winnerLabel && (
-        <div className="absolute inset-0 bg-black/65 grid place-items-center" >
-            <Card className="p-8 bg-slate-900/95 border-amber-400/40 text-center" >
-                <h2 className="text-3xl font-bold text-amber-300" > { winnerLabel } </h2>
-                    < p className = "text-white/70 mt-2" > Fight complete.Press rematch to restart instantly.</p>
-                        </Card>
-                        </div>
-          )
-}
-</Card>
-
-    < div className = "grid md:grid-cols-2 gap-4" >
-        <Card className="p-4 bg-slate-900/70 border-emerald-400/20" >
-            <div className="font-semibold mb-2 flex items-center gap-2 text-emerald-300" >
-                <Crosshair className="w-4 h-4" />
-                    P1 Controls(Ronin)
-                        </div>
-                        < div className = "text-sm text-white/80 space-y-1" >
-                            <div>A / D: move, W: jump </div>
-                                < div > Q: normal attack({ roninMoveSet.normalName }) </div>
-                                    < div > E: neutral special({ roninMoveSet.neutralSpecialName }) </div>
-                                        < div > W + E: up special({ roninMoveSet.upSpecialName }) </div>
-                                            < div > S + E: down special({ roninMoveSet.downSpecialName }) </div>
-                                                </div>
-                                                </Card>
-
-                                                < Card className = "p-4 bg-slate-900/70 border-sky-400/20" >
-                                                    <div className="font-semibold mb-2 flex items-center gap-2 text-sky-300" >
-                                                        <Zap className="w-4 h-4" />
-                                                            P2 Controls(Wraith)
-                                                                </div>
-                                                                < div className = "text-sm text-white/80 space-y-1" >
-                                                                    <div>Arrow Left / Right: move, Arrow Up: jump </div>
-                                                                        <div> / : normal attack({ assassinMoveSet.normalName }) </div>
-              <div>. : neutral special({ assassinMoveSet.neutralSpecialName }) </div>
-    < div > Arrow Up + . : up special({ assassinMoveSet.upSpecialName }) </div>
-        < div > Arrow Down + . : down special({ assassinMoveSet.downSpecialName }) </div>
-            </div>
-            </Card>
-            </div>
-
-            < Card className = "p-4 bg-slate-900/70 border-amber-400/20 text-sm text-white/75" >
-                <div className="font-semibold mb-2 flex items-center gap-2 text-amber-300" >
-                    <Shield className="w-4 h-4" />
-                        Combat Notes
+                <Card className="relative overflow-hidden border-white/10 bg-slate-900/80">
+                    <div className="p-4 border-b border-white/10 flex flex-wrap items-center gap-4 justify-between">
+                        <div className="min-w-[260px]">
+                            <div className="text-sm text-white/70 mb-1">Player 1: {roninMoveSet.name}</div>
+                            <div className="grid grid-cols-10 gap-1">
+                                {Array.from({ length: 10 }, (_, idx) => (
+                                    <div
+                                        key={`p1-hp-${idx}`}
+                                        className={`h-3 rounded-sm ${idx < Math.ceil(hud.p1Hp / 10) ? "bg-emerald-500" : "bg-white/10"}`}
+                                    />
+                                ))}
                             </div>
-                            <div>
-            All reference fighter animations are used in this mode: idle, run, jump, fall, attack, take hit, and death.
-            Directional specials are mapped in a Smash - like style with neutral, up, and down variants.Down specials open a brief
-            counter window, while neutral specials fire ranged attacks and up specials perform airborne dash strikes.
-          </div>
-    </Card>
-    </div>
-    </div>
-  );
+                        </div>
+
+                        <div className="min-w-[260px]">
+                            <div className="text-sm text-white/70 mb-1 text-right">Player 2: {assassinMoveSet.name}</div>
+                            <div className="grid grid-cols-10 gap-1">
+                                {Array.from({ length: 10 }, (_, idx) => (
+                                    <div
+                                        key={`p2-hp-${idx}`}
+                                        className={`h-3 rounded-sm ${idx < Math.ceil(hud.p2Hp / 10) ? "bg-sky-400" : "bg-white/10"}`}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    <canvas
+                        ref={canvasRef}
+                        width={ARENA_WIDTH}
+                        height={ARENA_HEIGHT}
+                        className="w-full h-auto max-h-[70vh] block bg-black"
+                        data-testid="grudge-fighter-canvas"
+                    />
+
+                    {!isReady && !loadError && (
+                        <div className="absolute inset-0 bg-black/60 grid place-items-center text-white/80 text-lg">
+                            Loading sprites and animation sheets...
+                        </div>
+                    )}
+
+                    {winnerLabel && (
+                        <div className="absolute inset-0 bg-black/65 grid place-items-center">
+                            <Card className="p-8 bg-slate-900/95 border-amber-400/40 text-center">
+                                <h2 className="text-3xl font-bold text-amber-300">{winnerLabel}</h2>
+                                <p className="text-white/70 mt-2">Fight complete. Press rematch to restart instantly.</p>
+                            </Card>
+                        </div>
+                    )}
+                </Card>
+
+                <div className="grid md:grid-cols-2 gap-4">
+                    <Card className="p-4 bg-slate-900/70 border-emerald-400/20">
+                        <div className="font-semibold mb-2 flex items-center gap-2 text-emerald-300">
+                            <Crosshair className="w-4 h-4" />
+                            P1 Controls (Ronin)
+                        </div>
+                        <div className="text-sm text-white/80 space-y-1">
+                            <div>A / D: move, W: jump</div>
+                            <div>Q: normal attack ({roninMoveSet.normalName})</div>
+                            <div>E: neutral special ({roninMoveSet.neutralSpecialName})</div>
+                            <div>W + E: up special ({roninMoveSet.upSpecialName})</div>
+                            <div>S + E: down special ({roninMoveSet.downSpecialName})</div>
+                        </div>
+                    </Card>
+
+                    <Card className="p-4 bg-slate-900/70 border-sky-400/20">
+                        <div className="font-semibold mb-2 flex items-center gap-2 text-sky-300">
+                            <Zap className="w-4 h-4" />
+                            P2 Controls (Wraith)
+                        </div>
+                        <div className="text-sm text-white/80 space-y-1">
+                            <div>Arrow Left / Right: move, Arrow Up: jump</div>
+                            <div>/ : normal attack ({assassinMoveSet.normalName})</div>
+                            <div>. : neutral special ({assassinMoveSet.neutralSpecialName})</div>
+                            <div>Arrow Up + . : up special ({assassinMoveSet.upSpecialName})</div>
+                            <div>Arrow Down + . : down special ({assassinMoveSet.downSpecialName})</div>
+                        </div>
+                    </Card>
+                </div>
+
+                <Card className="p-4 bg-slate-900/70 border-amber-400/20 text-sm text-white/75">
+                    <div className="font-semibold mb-2 flex items-center gap-2 text-amber-300">
+                        <Shield className="w-4 h-4" />
+                        Combat Notes
+                    </div>
+                    <div>
+                        All reference fighter animations are used in this mode: idle, run, jump, fall, attack, take hit, and death.
+                        Directional specials are mapped in a Smash-like style with neutral, up, and down variants. Down specials open a brief
+                        counter window, while neutral specials fire ranged attacks and up specials perform airborne dash strikes.
+                    </div>
+                </Card>
+            </div>
+        </div>
+    );
 }

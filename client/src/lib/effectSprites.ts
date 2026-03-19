@@ -13,21 +13,21 @@ export interface EffectSpriteConfig {
   isProjectile?: boolean; // true = traveling projectile, false = impact effect
 }
 
-// Import impact effect sprites (4x2 grid, 8 frames)
-import arcanebolt from "@assets/arcanebolt_1768553615895.png";
-import arcanelighting from "@assets/arcanelighting_1768553615895.png";
-import arcanemist from "@assets/arcanemist_1768553615896.png";
-import arcaneslash from "@assets/arcaneslash_1768553615896.png";
-import crit from "@assets/crit_1768553615896.png";
-import extraoverlay from "@assets/extraoverlay_1768553615897.png";
-import flamestrike from "@assets/flamestrike_1768553615897.png";
-import frostbolt from "@assets/frostbolt_1768553615898.png";
-import frozen from "@assets/frozen_1768553615898.png";
-import healingregen from "@assets/healingregen_1768553615898.png";
-import healingwave from "@assets/healingwave_1768553615899.png";
-import hit from "@assets/hit_1768553615899.png";
-import holyheal from "@assets/holyheal_1768553615899.png";
-import holylight from "@assets/holylight_1768553615900.png";
+// Impact effect sprite paths — move PNGs into client/public/effects/ to enable
+const arcanebolt = "/effects/arcanebolt.png";
+const arcanelighting = "/effects/arcanelighting.png";
+const arcanemist = "/effects/arcanemist.png";
+const arcaneslash = "/effects/arcaneslash.png";
+const crit = "/effects/crit.png";
+const extraoverlay = "/effects/extraoverlay.png";
+const flamestrike = "/effects/flamestrike.png";
+const frostbolt = "/effects/frostbolt.png";
+const frozen = "/effects/frozen.png";
+const healingregen = "/effects/healingregen.png";
+const healingwave = "/effects/healingwave.png";
+const hit = "/effects/hit.png";
+const holyheal = "/effects/holyheal.png";
+const holylight = "/effects/holylight.png";
 
 // Import projectile sprites from character folders (horizontal strips)
 import wizardAttack01 from "@/assets/GrudgeRPGAssets2d/GrudgeRPGAssets2d/Magic(Projectile)/Wizard-Attack01_Effect.png";
