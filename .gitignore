@@ -1,0 +1,45 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+server/public
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+vite.config.ts.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Replit / dev artifacts
+.replit
+.config/
+.local/
+.ccls-cache/
+.agents/
+.history/
+.venv/
+replit.md
+
+# Misc
+*.tar.gz
+docker-compose.override.yml
+PATH.txt
+settings.txt
+
+# Reference / temp
+_reference_fighting_game/
+
+# Vercel
+.vercel

@@ -1,0 +1,214 @@
+TETHICAL SPRITE ANIMATION SYSTEM
+=================================
+
+ANIMATION WORKFLOW
+------------------
+Sprites use horizontal sprite sheets. Each frame is arranged left-to-right.
+Animation plays by shifting CSS background-position at configurable FPS.
+
+Key Files:
+- client/src/lib/spriteManifest.ts - Defines all sprites and animations
+- client/src/components/SpriteAnimator.tsx - Renders animated sprites
+- client/src/lib/unitSprites.ts - Maps races/classes to sprites
+
+Sprite Path Format:
+- Base: /sprites/characters/{folder}/{fileName}.png
+- Effects: /sprites/characters/{effectsFolder}/{fileName}.png
+- Projectiles: /sprites/characters/{projectileFolder}/{fileName}.png
+
+Animation Properties:
+- frames: number of horizontal frames in sheet
+- frameWidth/frameHeight: size per frame (default 100x100)
+- loop: true for idle/walk, false for attacks
+- isEffect: weapon trails, magic overlays
+- isProjectile: arrows, thrown objects
+
+
+DEBUGGING
+---------
+1. Set showDebug={true} on SpriteAnimator to see frame counts and dimensions
+2. Check console for "Failed to load sprite" warnings
+3. Verify frame count matches actual sheet (width = frameWidth * frames)
+4. Admin page (/admin) provides live sprite testing
+
+
+SPRITE LIST (20 Total)
+======================
+
+1. ARCHER
+   Folder: Archer/Archer
+   Effects: Archer/Archer(Split Effects)
+   Projectile: Archer/Arrow(projectile)
+   attack01 (9f) -> attack01_effect (9f)
+   attack02 (12f) -> attack02_effect (12f)
+   idle(6), walk(8), death(4), hurt(4), arrow(1)
+
+2. ARMORED AXEMAN
+   Folder: Armored Axeman/Armored Axeman
+   Effects: Armored Axeman/Armored Axeman(Split Effects)
+   attack01 (9f) -> attack01_effect (9f)
+   attack02 (9f) -> attack02_effect (9f)
+   attack03 (12f) -> attack03_effect (12f)
+   idle(6), walk(8), death(4), hurt(4)
+
+3. ARMORED ORC
+   Folder: Armored Orc/Armored Orc
+   Effects: Armored Orc/Armored Orc(Split Effects)
+   attack01 (7f) -> attack01_effect (7f)
+   attack02 (8f) -> attack02_effect (8f)
+   attack03 (9f) -> attack03_effect (9f)
+   idle(6), walk(8), block(4), death(4), hurt(4)
+
+4. ARMORED SKELETON
+   Folder: Armored Skeleton/Armored Skeleton
+   Effects: Armored Skeleton/Armored Skeleton(Split Effects)
+   attack01 (8f) -> attack01_effect (8f)
+   attack02 (9f) -> attack02_effect (9f)
+   idle(6), walk(8), death(4), hurt(4)
+
+5. ELITE ORC
+   Folder: Elite Orc/Elite Orc
+   Effects: Elite Orc/Elite Orc(Split Effects)
+   attack01 (7f) -> attack01_effect (7f)
+   attack02 (11f) -> attack02_effect (11f)
+   attack03 (9f) -> attack03_effect (9f)
+   idle(6), walk(8), death(4), hurt(4)
+
+6. GREATSWORD SKELETON
+   Folder: Greatsword Skeleton/Greatsword Skeleton
+   Effects: Greatsword Skeleton/Greatsword Skeleton(Split Effects)
+   attack01 (9f) -> attack01_effect (9f)
+   attack02 (12f) -> attack02_effect (12f)
+   attack03 (8f) -> attack03_effect (8f)
+   idle(6), walk(9), death(4), hurt(4)
+
+7. KNIGHT
+   Folder: Knight/Knight
+   Effects: Knight/Knight(Split Effects)
+   attack01 (7f) -> attack01_effect (7f)
+   attack02 (10f) -> attack02_effect (10f)
+   attack03 (11f) -> attack03_effect (11f)
+   idle(6), walk(8), block(4), death(4), hurt(4)
+
+8. KNIGHT TEMPLAR
+   Folder: Knight Templar/Knight Templar
+   Effects: Knight Templar/Knight Templar(Split Effects)
+   attack01 (7f) -> attack01_effect (7f)
+   attack02 (8f) -> attack02_effect (8f)
+   attack03 (11f) -> attack03_effect (11f)
+   idle(6), walk01(8), walk02(8), block(4), death(4), hurt(4)
+
+9. LANCER
+   Folder: Lancer/Lancer
+   Effects: Lancer/Lancer(Split Effects)
+   attack01 (6f) -> attack01_effect (6f)
+   attack02 (9f) -> attack02_effect (9f)
+   attack03 (8f) -> attack03_effect (8f)
+   idle(6), walk01(8), walk02(8), death(4), hurt(4)
+
+10. ORC
+    Folder: Orc/Orc
+    Effects: Orc/Orc(Split Effects)
+    attack01 (6f) -> attack01_effect (6f)
+    attack02 (6f) -> attack02_effect (6f)
+    idle(6), walk(8), death(4), hurt(4)
+
+11. ORC RIDER
+    Folder: Orc rider/Orc rider
+    Effects: Orc rider/Orc rider(Split Effects)
+    attack01 (8f) -> attack01_effect (8f)
+    attack02 (9f) -> attack02_effect (9f)
+    attack03 (11f) -> attack03_effect (11f)
+    idle(6), walk(8), block(4), death(4), hurt(4)
+
+12. PRIEST
+    Folder: Priest/Priest
+    Effects: Priest/Priest(Split Effects)
+    attack (9f) -> attack_effect (5f)
+    heal (6f) -> heal_effect (4f)
+    idle(6), walk(8), death(4), hurt(4)
+
+13. SKELETON
+    Folder: Skeleton/Skeleton
+    Effects: Skeleton/Skeleton(Split Effects)
+    attack01 (7f) -> attack01_effect (7f)
+    attack02 (8f) -> attack02_effect (8f)
+    idle(6), walk(8), death(4), hurt(4)
+
+14. SKELETON ARCHER
+    Folder: Skeleton Archer/Skeleton Archer
+    Effects: Skeleton Archer/Skeleton Archer(Split Effects)
+    Projectile: Skeleton Archer/Arrow(projectile)
+    attack (9f) -> attack_effect (9f)
+    idle(6), walk(8), death(4), hurt(4), arrow(1)
+
+15. SLIME
+    Folder: Slime/Slime
+    Effects: Slime/Slime(Split Effects)
+    attack01 (6f) -> attack01_effect (6f)
+    attack02 (11f) -> attack02_effect (11f)
+    idle(6), walk(6), death(4), hurt(4)
+
+16. SOLDIER
+    Folder: Soldier/Soldier
+    Effects: Soldier/Soldier(Split Effects)
+    attack01 (8f) -> attack01_effect (8f)
+    attack02 (9f) -> attack02_effect (9f)
+    attack03 (10f) -> attack03_effect (10f)
+    idle(6), walk(8), block(4), death(4), hurt(4)
+
+17. SWORDSMAN
+    Folder: Swordsman/Swordsman
+    Effects: Swordsman/Swordsman(Split Effects)
+    attack01 (7f) -> attack01_effect (7f)
+    attack02 (15f) -> attack02_effect (15f)
+    attack03 (12f) -> attack03_effect (12f)
+    idle(6), walk(8), death(4), hurt(5)
+
+18. WEREBEAR
+    Folder: Werebear/Werebear
+    Effects: Werebear/Werebear(Split Effects)
+    attack01 (9f) -> attack01_effect (9f)
+    attack02 (13f) -> attack02_effect (13f)
+    attack03 (9f) -> attack03_effect (9f)
+    idle(6), walk(8), death(4), hurt(4)
+
+19. WEREWOLF
+    Folder: Werewolf/Werewolf
+    Effects: Werewolf/Werewolf(Split Effects)
+    attack01 (9f) -> attack01_effect (9f)
+    attack02 (13f) -> attack02_effect (13f)
+    idle(6), walk(8), death(4), hurt(4)
+
+20. WIZARD
+    Folder: Wizard/Wizard
+    Effects: Wizard/Wizard(Split Effects)
+    attack01 (6f) -> attack01_effect (10f)
+    attack02 (6f) -> attack02_effect (7f)
+    idle(6), walk(8), death(4), hurt(4)
+
+
+SUMMARY TABLE
+-------------
+Sprite             | Attacks | Block | Projectile | Walk Variants
+-------------------|---------|-------|------------|---------------
+Archer             | 2       | No    | Yes        | 1
+Armored Axeman     | 3       | No    | No         | 1
+Armored Orc        | 3       | Yes   | No         | 1
+Armored Skeleton   | 2       | No    | No         | 1
+Elite Orc          | 3       | No    | No         | 1
+Greatsword Skeleton| 3       | No    | No         | 1
+Knight             | 3       | Yes   | No         | 1
+Knight Templar     | 3       | Yes   | No         | 2
+Lancer             | 3       | No    | No         | 2
+Orc                | 2       | No    | No         | 1
+Orc Rider          | 3       | Yes   | No         | 1
+Priest             | 1+Heal  | No    | No         | 1
+Skeleton           | 2       | No    | No         | 1
+Skeleton Archer    | 1       | No    | Yes        | 1
+Slime              | 2       | No    | No         | 1
+Soldier            | 3       | Yes   | No         | 1
+Swordsman          | 3       | No    | No         | 1
+Werebear           | 3       | No    | No         | 1
+Werewolf           | 2       | No    | No         | 1
+Wizard             | 2       | No    | No         | 1

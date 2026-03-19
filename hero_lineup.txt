@@ -1,0 +1,188 @@
+TETHICAL HERO LINEUP
+====================
+6 Races x 4 Classes = 24 Heroes
+
+FACTIONS:
+- Crusade: Human, Barbarian
+- Fabled: Dwarf, Elf
+- Legion: Orc, Undead
+
+
+CRUSADE FACTION
+===============
+
+HUMAN HEROES
+------------
+1. Sir Aldric the Bold
+   Race: Human | Class: Warrior
+   Sprite: Knight
+
+2. Sage Mirella
+   Race: Human | Class: Mage
+   Sprite: Wizard
+
+3. Captain Theron
+   Race: Human | Class: Ranger
+   Sprite: Archer
+
+4. Brother Matthias
+   Race: Human | Class: Worge
+   Sprite: Werebear
+
+BARBARIAN HEROES
+----------------
+5. Grimjaw Ironhide
+   Race: Barbarian | Class: Warrior
+   Sprite: Armored Axeman
+
+6. Shaman Vorak
+   Race: Barbarian | Class: Mage
+   Sprite: Priest
+
+7. Tracker Renna
+   Race: Barbarian | Class: Ranger
+   Sprite: Lancer
+
+8. Ulfric the Cursed
+   Race: Barbarian | Class: Worge
+   Sprite: Werewolf
+
+
+FABLED FACTION
+==============
+
+DWARF HEROES
+------------
+9. Thane Borin Stonehelm
+   Race: Dwarf | Class: Warrior
+   Sprite: Knight Templar
+
+10. Runekeeper Dagna
+    Race: Dwarf | Class: Mage
+    Sprite: Priest
+
+11. Scout Korrin
+    Race: Dwarf | Class: Ranger
+    Sprite: Soldier
+
+12. Fenrik Bearclaw
+    Race: Dwarf | Class: Worge
+    Sprite: Werebear
+
+ELF HEROES
+----------
+13. Blademaster Aeryn
+    Race: Elf | Class: Warrior
+    Sprite: Swordsman
+
+14. Archmage Luthien
+    Race: Elf | Class: Mage
+    Sprite: Wizard
+
+15. Windrunner Sylara
+    Race: Elf | Class: Ranger
+    Sprite: Archer
+
+16. Moonshifter Fennor
+    Race: Elf | Class: Worge
+    Sprite: Werewolf
+
+
+LEGION FACTION
+==============
+
+ORC HEROES
+----------
+17. Warchief Grok'thar
+    Race: Orc | Class: Warrior
+    Sprite: Armored Orc
+
+18. Witch Doctor Zul'jin
+    Race: Orc | Class: Mage
+    Sprite: Elite Orc
+
+19. Outrider Mok'ra
+    Race: Orc | Class: Ranger
+    Sprite: Orc Rider
+
+20. Beastlord Throk
+    Race: Orc | Class: Worge
+    Sprite: Werebear
+
+UNDEAD HEROES
+-------------
+21. Dreadknight Malachar
+    Race: Undead | Class: Warrior
+    Sprite: Armored Skeleton
+
+22. Lich Venaroth
+    Race: Undead | Class: Mage
+    Sprite: Greatsword Skeleton
+
+23. Deadeye Silas
+    Race: Undead | Class: Ranger
+    Sprite: Skeleton Archer
+
+24. Abomination Rex
+    Race: Undead | Class: Worge
+    Sprite: Slime
+
+
+SPRITE SUMMARY BY CLASS
+=======================
+
+WARRIORS (Heavy Melee)
+- Human: Knight
+- Barbarian: Armored Axeman
+- Dwarf: Knight Templar
+- Elf: Swordsman
+- Orc: Armored Orc
+- Undead: Armored Skeleton
+
+MAGES (Magic Casters)
+- Human: Wizard
+- Barbarian: Priest
+- Dwarf: Priest
+- Elf: Wizard
+- Orc: Elite Orc
+- Undead: Greatsword Skeleton
+
+RANGERS (Ranged/Mobile)
+- Human: Archer
+- Barbarian: Lancer
+- Dwarf: Soldier
+- Elf: Archer
+- Orc: Orc Rider
+- Undead: Skeleton Archer
+
+WORGE (Shapeshifters - Caster/Bear Forms)
+- Human: Werebear
+- Barbarian: Werewolf
+- Dwarf: Werebear
+- Elf: Werewolf
+- Orc: Werebear
+- Undead: Slime
+
+
+AVAILABLE SPRITES (20 Total)
+============================
+Archer (2 attacks, projectile)
+Armored Axeman (3 attacks)
+Armored Orc (3 attacks, block)
+Armored Skeleton (2 attacks)
+Elite Orc (3 attacks)
+Greatsword Skeleton (3 attacks)
+Knight (3 attacks, block)
+Knight Templar (3 attacks, block, 2 walks)
+Lancer (3 attacks, 2 walks)
+Orc (2 attacks)
+Orc Rider (3 attacks, block)
+Priest (attack + heal)
+Skeleton (2 attacks)
+Skeleton Archer (1 attack, projectile)
+Slime (2 attacks)
+Soldier (3 attacks, block)
+Swordsman (3 attacks)
+Werebear (3 attacks)
+Werewolf (2 attacks)
+Wizard (2 attacks)
