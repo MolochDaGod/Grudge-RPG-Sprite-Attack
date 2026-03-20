@@ -34,8 +34,20 @@ Default is the Puter URL above. Override for local dev or alternative backends.
 
 ## Deploying the Game Server
 
-### Option 1: Puter (Current)
-The server runs as a Puter app. Deploy updates via the Puter CLI or dashboard.
+### Option 1: Railway (Recommended for Quick Deploy)
+Railway supports WebSocket natively and deploys from GitHub.
+
+1. Go to [railway.app](https://railway.app) and connect your GitHub
+2. Create a new project from `MolochDaGod/Grudge-RPG-Sprite-Attack`
+3. Railway detects `railway.json` and `Dockerfile` automatically
+4. Set env variable: `PORT=5000`
+5. Deploy — you'll get a URL like `grudge-server-production.up.railway.app`
+6. Update the frontend:
+   ```
+   VITE_PVP_SERVER_URL=https://grudge-server-production.up.railway.app
+   ```
+
+Railway's free tier supports WebSocket connections and auto-scales.
 
 ### Option 2: Docker on a VM
 Best for production with guaranteed uptime.

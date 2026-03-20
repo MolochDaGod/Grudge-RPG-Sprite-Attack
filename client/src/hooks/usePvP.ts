@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 
-// Grudge PvP server — deployed on Puter
-const PVP_SERVER_URL = import.meta.env.VITE_PVP_SERVER_URL || "https://grudge-server-ambkk.puter.site";
+// Grudge PvP server — configurable via env, falls back to same origin (works when running `npm run dev`)
+const PVP_SERVER_URL = import.meta.env.VITE_PVP_SERVER_URL || window.location.origin;
 
 export type PvPState = "disconnected" | "connected" | "in-room" | "waiting" | "ready" | "fighting" | "opponent-left";
 
@@ -42,11 +42,15 @@ export function usePvP(): PvPHook {
   const connect = useCallback(() => {
     if (socketRef.current?.connected) return;
 
+    setError(null);
+    setState("disconnected");
+
     const socket = io(PVP_SERVER_URL, {
       path: "/pvp",
       transports: ["websocket", "polling"],
       reconnection: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 3,
+      timeout: 5000,
     });
 
     socket.on("connect", () => {
@@ -54,9 +58,14 @@ export function usePvP(): PvPHook {
       setError(null);
     });
 
-    socket.on("connect_error", (err) => {
-      setError(`Connection failed: ${err.message}`);
+    socket.on("connect_error", () => {
+      setError(
+        PVP_SERVER_URL === window.location.origin
+          ? "PvP server not running. Start with: npm run dev (runs on localhost:5000)"
+          : `Cannot reach PvP server at ${PVP_SERVER_URL}. Server may be offline.`
+      );
       setState("disconnected");
+      socket.disconnect();
     });
 
     socket.on("room:opponent-joined", () => {
