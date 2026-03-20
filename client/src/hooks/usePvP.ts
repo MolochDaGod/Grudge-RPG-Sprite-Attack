@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 
-// Grudge PvP server — configurable via env, falls back to same origin (works when running `npm run dev`)
-const PVP_SERVER_URL = import.meta.env.VITE_PVP_SERVER_URL || window.location.origin;
+// Grudge PvP server — Railway deployment, configurable via env
+const PVP_SERVER_URL = import.meta.env.VITE_PVP_SERVER_URL || "https://grudge-pvp-server-production.up.railway.app";
 
 export type PvPState = "disconnected" | "connected" | "in-room" | "waiting" | "ready" | "fighting" | "opponent-left";
 
