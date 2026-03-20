@@ -672,6 +672,51 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         if (fighterId === "p1") world.p1 = next; else world.p2 = next;
     }, []);
 
+    // LMB: Dash Attack — lunge forward + melee hit
+    const queueDashAttack = useCallback((fighterId: FighterId) => {
+        const world = worldRef.current;
+        if (!world || world.superFreeze) return;
+        const now = performance.now();
+        const actor = fighterId === "p1" ? world.p1 : world.p2;
+        if (world.winner || actor.hp <= 0) return;
+        if (now < actor.stateLockUntil) return;
+
+        const next = setState(
+            {
+                ...actor,
+                vx: actor.facing * 12,
+                stateLockUntil: now + 350,
+                attackHasConnected: false,
+            },
+            "attack",
+            now
+        );
+        if (fighterId === "p1") world.p1 = next; else world.p2 = next;
+    }, []);
+
+    // RMB: Block / Parry — enter counter stance
+    const queueBlock = useCallback((fighterId: FighterId) => {
+        const world = worldRef.current;
+        if (!world || world.superFreeze) return;
+        const now = performance.now();
+        const actor = fighterId === "p1" ? world.p1 : world.p2;
+        if (world.winner || actor.hp <= 0) return;
+        if (now < actor.stateLockUntil || now < actor.specialCooldownUntil) return;
+
+        const next = setState(
+            {
+                ...actor,
+                vx: 0,
+                stateLockUntil: now + 400,
+                specialCooldownUntil: now + 900,
+                counterUntil: now + 500,
+            },
+            "idle",
+            now
+        );
+        if (fighterId === "p1") world.p1 = next; else world.p2 = next;
+    }, []);
+
     const processInput = useCallback((fighterId: FighterId, controls: typeof P1_CONTROLS, key: string) => {
         const keys = pressedKeysRef.current;
         if (key === controls.jump) tryJump(fighterId);
@@ -701,15 +746,16 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         if (ai.superMeter >= SUPER_METER_MAX && dist < 200) { queueSuper("p2"); return; }
         if (dist < 150) {
             const r = Math.random();
-            if (r < 0.45) queueNormalAttack("p2");
-            else if (r < 0.65) queueSpecial("p2", "down");
-            else if (r < 0.8) queueSpecial("p2", "up");
+            if (r < 0.3) queueNormalAttack("p2");
+            else if (r < 0.45) queueDashAttack("p2");
+            else if (r < 0.6) queueBlock("p2");
+            else if (r < 0.75) queueSpecial("p2", "up");
             else queueSpecial("p2", "neutral");
             return;
         }
         if (dist < 400) { if (Math.random() < 0.4) queueSpecial("p2", "neutral"); else { const d = player.x > ai.x ? P2_CONTROLS.right : P2_CONTROLS.left; pressedKeysRef.current.add(d); setTimeout(() => pressedKeysRef.current.delete(d), 200); } return; }
         const d = player.x > ai.x ? P2_CONTROLS.right : P2_CONTROLS.left; pressedKeysRef.current.add(d); setTimeout(() => pressedKeysRef.current.delete(d), 300);
-    }, [tryJump, queueNormalAttack, queueSpecial, queueSuper]);
+    }, [tryJump, queueNormalAttack, queueSpecial, queueSuper, queueDashAttack, queueBlock]);
 
     // Gamepad polling
     const prevGpRef = useRef<Map<number, boolean[]>>(new Map());
@@ -731,9 +777,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             if (jp(0) || jp(2)) { const u = pressedKeysRef.current.has(ctrl.jump); const d = pressedKeysRef.current.has(ctrl.down); if (u) queueSpecial(fid, "up"); else if (d) queueSpecial(fid, "down"); else queueNormalAttack(fid); }
             if (jp(1)) queueSpecial(fid, "neutral");
             if (jp(5)) queueSuper(fid);
+            if (jp(7)) queueDashAttack(fid);  // RT = dash attack
+            if (jp(6)) queueBlock(fid);        // LT = block/parry
             prevGpRef.current.set(gi, curr);
         }
-    }, [vsAI, tryJump, queueNormalAttack, queueSpecial, queueSuper]);
+    }, [vsAI, tryJump, queueNormalAttack, queueSpecial, queueSuper, queueDashAttack, queueBlock]);
 
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
@@ -743,9 +791,26 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             if (!vsAI) processInput("p2", P2_CONTROLS, key);
         };
         const onKeyUp = (e: KeyboardEvent) => pressedKeysRef.current.delete(e.key.toLowerCase());
-        window.addEventListener("keydown", onKeyDown); window.addEventListener("keyup", onKeyUp);
-        return () => { window.removeEventListener("keydown", onKeyDown); window.removeEventListener("keyup", onKeyUp); pressedKeysRef.current.clear(); };
-    }, [processInput, vsAI]);
+
+        // Mouse: LMB = dash attack, RMB = block/parry (P1 only)
+        const onMouseDown = (e: MouseEvent) => {
+            if (e.button === 0) queueDashAttack("p1");   // LMB
+            if (e.button === 2) queueBlock("p1");         // RMB
+        };
+        const onContextMenu = (e: MouseEvent) => e.preventDefault(); // disable right-click menu
+
+        window.addEventListener("keydown", onKeyDown);
+        window.addEventListener("keyup", onKeyUp);
+        window.addEventListener("mousedown", onMouseDown);
+        window.addEventListener("contextmenu", onContextMenu);
+        return () => {
+            window.removeEventListener("keydown", onKeyDown);
+            window.removeEventListener("keyup", onKeyUp);
+            window.removeEventListener("mousedown", onMouseDown);
+            window.removeEventListener("contextmenu", onContextMenu);
+            pressedKeysRef.current.clear();
+        };
+    }, [processInput, vsAI, queueDashAttack, queueBlock]);
 
     useEffect(() => {
         if (selectPhase !== "fight" || !p1Pick || !p2Pick) return;
@@ -1624,12 +1689,12 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                         </div>
                         <div className="text-sm text-white/80 space-y-1">
                             <div>A/D: move · W: jump</div>
-                            <div>Q or E: melee attack</div>
-                            <div>F: ranged ({p1Pick?.moveSet.neutralSpecialName})</div>
+                            <div>Q or E: melee · F: ranged</div>
+                            <div className="text-sky-300">LMB: dash attack · RMB: block/parry</div>
                             <div>W+Q/E: {p1Pick?.moveSet.upSpecialName}</div>
                             <div>S+Q/E: {p1Pick?.moveSet.downSpecialName}</div>
                             <div className="text-amber-300">R: {p1Pick?.moveSet.superName} (when meter full)</div>
-                            <div className="text-white/50 mt-1">Gamepad: A=attack B=ranged X=attack Y=jump RB=super</div>
+                            <div className="text-white/50 mt-1">Gamepad: A/X=attack B=ranged RT=dash LT=block RB=super</div>
                         </div>
                     </Card>
                     <Card className="p-4 bg-slate-900/70 border-sky-400/20">
