@@ -343,8 +343,8 @@ function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet, stage: S
         width: 120,
         height: 220,
         facing: id === "p1" ? 1 : -1,
-        hp: 100,
-        maxHp: 100,
+        hp: 200,
+        maxHp: 200,
         stocks: STARTING_STOCKS,
         airJumpsLeft: MAX_AIR_JUMPS,
         invulnUntil: 0,
@@ -372,7 +372,7 @@ function respawnFighter(fighter: FighterRuntime, stage: StageDefinition): Fighte
         y: stage.mainFloorY - 300,
         vx: 0,
         vy: 0,
-        hp: 100,
+        hp: 200,
         airJumpsLeft: MAX_AIR_JUMPS,
         invulnUntil: now + RESPAWN_INVULN_MS,
         state: "fall",
@@ -442,6 +442,16 @@ function setState(fighter: FighterRuntime, state: AnimationState, now: number): 
     };
 }
 
+// Smash-style knockback: the lower your HP, the further you fly
+function calcKnockback(damage: number, targetHp: number, targetMaxHp: number): { kbX: number; kbY: number; hitstun: number } {
+    const hpPercent = 1 - (targetHp / targetMaxHp); // 0 at full HP, ~1 at near-death
+    const baseKb = 3 + damage * 0.25;
+    const scaledKb = baseKb * (1 + hpPercent * 2.5); // up to 3.5x knockback at low HP
+    const kbY = -(2 + hpPercent * 8 + damage * 0.15); // more upward launch at low HP
+    const hitstun = 200 + hpPercent * 300; // longer hitstun at low HP
+    return { kbX: scaledKb, kbY, hitstun };
+}
+
 function applyDamage(
     target: FighterRuntime,
     attacker: FighterRuntime,
@@ -453,14 +463,15 @@ function applyDamage(
         return { target, attacker, wasCounter: false };
     }
     if (target.counterUntil > now && target.state !== "death") {
+        const counterKb = calcKnockback(target.moveSet.counterDamage, attacker.hp, attacker.maxHp);
         const newAttackerHp = Math.max(0, attacker.hp - target.moveSet.counterDamage);
         const nextAttacker = setState(
             {
                 ...attacker,
                 hp: newAttackerHp,
-                vx: -target.facing * 6,
-                vy: -5,
-                stateLockUntil: now + 260,
+                vx: -target.facing * counterKb.kbX,
+                vy: counterKb.kbY,
+                stateLockUntil: now + counterKb.hitstun,
             },
             newAttackerHp <= 0 ? "death" : "takeHit",
             now
@@ -473,13 +484,14 @@ function applyDamage(
     }
 
     const nextHp = Math.max(0, target.hp - damage);
+    const kb = calcKnockback(damage, target.hp, target.maxHp);
     const damagedTarget = setState(
         {
             ...target,
             hp: nextHp,
-            vx: attacker.facing * 4,
-            vy: -4,
-            stateLockUntil: now + 230,
+            vx: attacker.facing * kb.kbX,
+            vy: kb.kbY,
+            stateLockUntil: now + kb.hitstun,
             counterUntil: 0,
         },
         nextHp <= 0 ? "death" : "takeHit",
@@ -549,7 +561,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const animationFrameRef = useRef<number | null>(null);
     const [isReady, setIsReady] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
-    const [hud, setHud] = useState({ p1Hp: 100, p2Hp: 100, p1Super: 0, p2Super: 0, p1Stocks: STARTING_STOCKS, p2Stocks: STARTING_STOCKS, p1AirJumps: MAX_AIR_JUMPS, p2AirJumps: MAX_AIR_JUMPS, winner: null as FighterId | null, elapsed: 0 });
+    const [hud, setHud] = useState({ p1Hp: 200, p2Hp: 200, p1Super: 0, p2Super: 0, p1Stocks: STARTING_STOCKS, p2Stocks: STARTING_STOCKS, p1AirJumps: MAX_AIR_JUMPS, p2AirJumps: MAX_AIR_JUMPS, winner: null as FighterId | null, elapsed: 0 });
     const [vsAI, setVsAI] = useState(true);
     const aiTimerRef = useRef(0);
 
@@ -605,7 +617,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         pvp.disconnect();
         assetsRef.current = null;
         worldRef.current = null;
-        setHud({ p1Hp: 100, p2Hp: 100, p1Super: 0, p2Super: 0, p1Stocks: STARTING_STOCKS, p2Stocks: STARTING_STOCKS, p1AirJumps: MAX_AIR_JUMPS, p2AirJumps: MAX_AIR_JUMPS, winner: null, elapsed: 0 });
+        setHud({ p1Hp: 200, p2Hp: 200, p1Super: 0, p2Super: 0, p1Stocks: STARTING_STOCKS, p2Stocks: STARTING_STOCKS, p1AirJumps: MAX_AIR_JUMPS, p2AirJumps: MAX_AIR_JUMPS, winner: null, elapsed: 0 });
         if (animationFrameRef.current !== null) {
             cancelAnimationFrame(animationFrameRef.current);
             animationFrameRef.current = null;
@@ -624,7 +636,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             superFreeze: null,
         };
         cameraRef.current = { x: stage.mainFloorX, y: stage.mainFloorY - 400, zoom: 1 };
-        setHud({ p1Hp: 100, p2Hp: 100, p1Super: 0, p2Super: 0, p1Stocks: STARTING_STOCKS, p2Stocks: STARTING_STOCKS, p1AirJumps: MAX_AIR_JUMPS, p2AirJumps: MAX_AIR_JUMPS, winner: null, elapsed: 0 });
+        setHud({ p1Hp: 200, p2Hp: 200, p1Super: 0, p2Super: 0, p1Stocks: STARTING_STOCKS, p2Stocks: STARTING_STOCKS, p1AirJumps: MAX_AIR_JUMPS, p2AirJumps: MAX_AIR_JUMPS, winner: null, elapsed: 0 });
     }, [p1Pick, p2Pick]);
 
     const queueNormalAttack = useCallback((fighterId: FighterId) => {
@@ -1355,17 +1367,16 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 // Darken + zoom lines
                 ctx.globalAlpha = 0.5;
                 ctx.fillStyle = "#000";
-                ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
+                ctx.fillRect(0, 0, VIEWPORT_W, VIEWPORT_H);
                 // Radial burst lines
                 ctx.globalAlpha = 0.3 + 0.3 * Math.sin(now / 30);
-                const attacker = world.superFreeze.attacker === "p1" ? world.p1 : world.p2;
                 ctx.strokeStyle = "#ffd700";
                 ctx.lineWidth = 2;
                 for (let i = 0; i < 24; i++) {
                     const angle = (i / 24) * Math.PI * 2 + now / 200;
                     ctx.beginPath();
-                    ctx.moveTo(attacker.x + Math.cos(angle) * 40, (attacker.y - attacker.height * 0.5) + Math.sin(angle) * 40);
-                    ctx.lineTo(attacker.x + Math.cos(angle) * (200 + progress * 400), (attacker.y - attacker.height * 0.5) + Math.sin(angle) * (200 + progress * 400));
+                    ctx.moveTo(VIEWPORT_W / 2 + Math.cos(angle) * 40, VIEWPORT_H / 2 + Math.sin(angle) * 40);
+                    ctx.lineTo(VIEWPORT_W / 2 + Math.cos(angle) * (200 + progress * 400), VIEWPORT_H / 2 + Math.sin(angle) * (200 + progress * 400));
                     ctx.stroke();
                 }
                 // Super name text
@@ -1374,10 +1385,10 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 ctx.font = "bold 48px serif";
                 ctx.textAlign = "center";
                 const name = (world.superFreeze.attacker === "p1" ? p1Pick : p2Pick)?.moveSet.superName ?? "SUPER";
-                ctx.fillText(name, ARENA_WIDTH / 2, ARENA_HEIGHT / 2 - 30);
+                ctx.fillText(name, VIEWPORT_W / 2, VIEWPORT_H / 2 - 30);
                 ctx.font = "24px serif";
                 ctx.fillStyle = "#fff";
-                ctx.fillText((world.superFreeze.attacker === "p1" ? p1Pick : p2Pick)?.name ?? "", ARENA_WIDTH / 2, ARENA_HEIGHT / 2 + 20);
+                ctx.fillText((world.superFreeze.attacker === "p1" ? p1Pick : p2Pick)?.name ?? "", VIEWPORT_W / 2, VIEWPORT_H / 2 + 20);
                 ctx.textAlign = "left";
                 ctx.restore();
             }
@@ -1444,7 +1455,17 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
             // NO clamping to arena edges — fighters can fall off!
 
+            // Body collision push — fighters can't overlap
+            const pushDist = 60; // minimum distance between centers
+            const dx = x - opponent.x;
+            const absDx = Math.abs(dx);
+            if (absDx < pushDist && absDx > 0.1 && Math.abs(y - opponent.y) < fighter.height * 0.8) {
+                const push = (pushDist - absDx) * 0.5 * Math.sign(dx);
+                x += push;
+            }
+
             const facing = opponent.x >= x ? 1 : -1;
+            const grounded = floorY !== null;
             let next = {
                 ...fighter,
                 x,
@@ -1459,7 +1480,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             }
 
             if (now >= next.stateLockUntil) {
-                if (next.y < FLOOR_Y - 0.5) {
+                if (!grounded && next.vy !== 0) {
                     next = setState(next, next.vy < 0 ? "jump" : "fall", now);
                 } else if (Math.abs(next.vx) > 1.4) {
                     next = setState(next, "run", now);
@@ -1960,7 +1981,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                             </div>
                             <div className="grid grid-cols-10 gap-1">
                                 {Array.from({ length: 10 }, (_, idx) => (
-                                    <div key={`p1-hp-${idx}`} className={`h-3 rounded-sm ${idx < Math.ceil(hud.p1Hp / 10) ? "bg-emerald-500" : "bg-white/10"}`} />
+                                    <div key={`p1-hp-${idx}`} className={`h-3 rounded-sm ${idx < Math.ceil(hud.p1Hp / 20) ? "bg-emerald-500" : "bg-white/10"}`} />
                                 ))}
                             </div>
                         </div>
@@ -1975,7 +1996,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                             </div>
                             <div className="grid grid-cols-10 gap-1">
                                 {Array.from({ length: 10 }, (_, idx) => (
-                                    <div key={`p2-hp-${idx}`} className={`h-3 rounded-sm ${idx < Math.ceil(hud.p2Hp / 10) ? "bg-sky-400" : "bg-white/10"}`} />
+                                    <div key={`p2-hp-${idx}`} className={`h-3 rounded-sm ${idx < Math.ceil(hud.p2Hp / 20) ? "bg-sky-400" : "bg-white/10"}`} />
                                 ))}
                             </div>
                         </div>
