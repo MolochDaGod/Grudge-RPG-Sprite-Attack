@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { ArrowLeft, Crosshair, Shield, Zap, Wifi, Globe } from "lucide-react";
 import { usePvP } from "@/hooks/usePvP";
+import { GRUDA_ROSTER, type GrudaCharDef } from "@/lib/grudaRoster";
 
 type FighterId = "p1" | "p2";
 type AnimationState = "idle" | "run" | "jump" | "fall" | "attack" | "takeHit" | "death";
@@ -175,149 +176,47 @@ interface ActiveEffect {
     flip: boolean;
 }
 
-function charSprites(folder: string, config: {
-    idle: [string, number]; run: [string, number]; attack: [string, number];
-    takeHit: [string, number]; death: [string, number];
-}): FighterSpriteSet {
-    const base = `/fighter2d/characters/${folder}/`;
+// Convert GRUDA roster data into CharacterDef for the fighter engine
+function grudaToCharDef(g: GrudaCharDef): CharacterDef {
+    const base = `/fighter2d/characters/${g.folder}/`;
+    const s = (file: string, frames: number, hold: number, loop: boolean) => ({ src: base + file, frames, hold, loop });
     return {
-        idle:    { src: base + config.idle[0],    frames: config.idle[1],    hold: 6, loop: true },
-        run:     { src: base + config.run[0],     frames: config.run[1],     hold: 5, loop: true },
-        jump:    { src: base + config.idle[0],    frames: config.idle[1],    hold: 6, loop: false }, // reuse idle as jump
-        fall:    { src: base + config.idle[0],    frames: config.idle[1],    hold: 6, loop: false }, // reuse idle as fall
-        attack:  { src: base + config.attack[0],  frames: config.attack[1],  hold: 4, loop: false },
-        takeHit: { src: base + config.takeHit[0], frames: config.takeHit[1], hold: 5, loop: false },
-        death:   { src: base + config.death[0],   frames: config.death[1],   hold: 7, loop: false },
+        id: g.id,
+        name: g.name,
+        color: g.color,
+        sprites: {
+            idle:    s(g.idle[0], g.idle[1], 6, true),
+            run:     s(g.walk[0], g.walk[1], 5, true),
+            jump:    s(g.jump?.[0] ?? g.idle[0], g.jump?.[1] ?? g.idle[1], 6, false),
+            fall:    s(g.idle[0], g.idle[1], 6, false),
+            attack:  s(g.attack[0], g.attack[1], 4, false),
+            takeHit: s(g.hurt[0], g.hurt[1], 5, false),
+            death:   s(g.death[0], g.death[1], 7, false),
+        },
+        moveSet: {
+            name: g.name,
+            normalName: "Strike",
+            neutralSpecialName: "Ranged",
+            upSpecialName: "Up Special",
+            downSpecialName: "Counter",
+            superName: g.superName,
+            runSpeed: g.spd,
+            jumpForce: 16,
+            baseDamage: g.atk,
+            projectileDamage: Math.round(g.atk * 0.8),
+            upSpecialDamage: Math.round(g.atk * 1.1),
+            counterDamage: Math.round(g.atk * 1.5),
+            superDamage: g.superDmg,
+        },
+        attackEffect: g.effectSrc
+            ? { src: `/fighter2d/effects/${g.effectSrc}`, frames: g.effectFrames ?? 6, hold: 3 }
+            : { src: "/fighter2d/effects/slash_arc.png", frames: 6, hold: 3 },
+        projectileSrc: g.projectile ? `/fighter2d/projectiles/${g.projectile}` : undefined,
+        projectileFrames: g.projectile ? 1 : undefined,
     };
 }
 
-const CHARACTER_ROSTER: CharacterDef[] = [
-    {
-        id: "knight",
-        name: "Knight",
-        color: "#e74c3c",
-        sprites: charSprites("Knight", {
-            idle: ["Knight-Idle.png", 6], run: ["Knight-Walk.png", 8],
-            attack: ["Knight-Attack03.png", 11], takeHit: ["Knight-Hurt.png", 4], death: ["Knight-Death.png", 4],
-        }),
-        moveSet: {
-            name: "Knight", normalName: "Broadsword Slash",
-            neutralSpecialName: "Shield Throw (Ranged)", upSpecialName: "Skyward Cleave",
-            downSpecialName: "Iron Bulwark (Counter)", superName: "Divine Judgment",
-            runSpeed: 5.6, jumpForce: 16, baseDamage: 13, projectileDamage: 10,
-            upSpecialDamage: 14, counterDamage: 20, superDamage: 35,
-        },
-        attackEffect: { src: "/fighter2d/effects/Knight-Attack03_Effect.png", frames: 11, hold: 3 },
-    },
-    {
-        id: "archer",
-        name: "Archer",
-        color: "#27ae60",
-        sprites: charSprites("Archer", {
-            idle: ["Archer-Idle.png", 6], run: ["Archer-Walk.png", 8],
-            attack: ["Archer-Attack02.png", 12], takeHit: ["Archer-Hurt.png", 4], death: ["Archer-Death.png", 4],
-        }),
-        moveSet: {
-            name: "Archer", normalName: "Quick Shot",
-            neutralSpecialName: "Piercing Arrow (Ranged)", upSpecialName: "Aerial Volley",
-            downSpecialName: "Evade Counter", superName: "Storm of Arrows",
-            runSpeed: 6.8, jumpForce: 17.5, baseDamage: 9, projectileDamage: 15,
-            upSpecialDamage: 11, counterDamage: 16, superDamage: 30,
-        },
-        attackEffect: { src: "/fighter2d/effects/Archer-Attack02_Effect.png", frames: 12, hold: 3 },
-        projectileSrc: "/fighter2d/projectiles/Arrow.png",
-        projectileFrames: 1,
-    },
-    {
-        id: "wizard",
-        name: "Wizard",
-        color: "#8e44ad",
-        sprites: charSprites("Wizard", {
-            idle: ["Wizard-Idle.png", 6], run: ["Wizard-Walk.png", 8],
-            attack: ["Wizard-Attack01.png", 6], takeHit: ["Wizard-Hurt.png", 4], death: ["Wizard-DEATH.png", 4],
-        }),
-        moveSet: {
-            name: "Wizard", normalName: "Arcane Blast",
-            neutralSpecialName: "Fireball (Ranged)", upSpecialName: "Teleport Strike",
-            downSpecialName: "Mana Shield (Counter)", superName: "Arcane Apocalypse",
-            runSpeed: 5.4, jumpForce: 16.5, baseDamage: 10, projectileDamage: 16,
-            upSpecialDamage: 12, counterDamage: 22, superDamage: 40,
-        },
-        attackEffect: { src: "/fighter2d/effects/Wizard-Attack01_Effect.png", frames: 10, hold: 3 },
-        projectileSrc: "/fighter2d/projectiles/Wizard-Projectile.png",
-        projectileFrames: 10,
-    },
-    {
-        id: "orc",
-        name: "Orc",
-        color: "#2ecc71",
-        sprites: charSprites("Orc", {
-            idle: ["Orc-Idle.png", 6], run: ["Orc-Walk.png", 8],
-            attack: ["Orc-Attack01.png", 6], takeHit: ["Orc-Hurt.png", 4], death: ["Orc-Death.png", 4],
-        }),
-        moveSet: {
-            name: "Orc", normalName: "Axe Swing",
-            neutralSpecialName: "Boulder Toss (Ranged)", upSpecialName: "Leap Slam",
-            downSpecialName: "Berserker Rage (Counter)", superName: "Waaagh! Smash",
-            runSpeed: 5.0, jumpForce: 15, baseDamage: 15, projectileDamage: 12,
-            upSpecialDamage: 16, counterDamage: 18, superDamage: 38,
-        },
-        attackEffect: { src: "/fighter2d/effects/Orc-attack01_Effect.png", frames: 6, hold: 4 },
-    },
-    {
-        id: "skeleton",
-        name: "Armored Skeleton",
-        color: "#95a5a6",
-        sprites: charSprites("Armored-Skeleton", {
-            idle: ["Armored Skeleton-Idle.png", 6], run: ["Armored Skeleton-Walk.png", 8],
-            attack: ["Armored Skeleton-Attack02.png", 9], takeHit: ["Armored Skeleton-Hurt.png", 4],
-            death: ["Armored Skeleton-Death.png", 4],
-        }),
-        moveSet: {
-            name: "Armored Skeleton", normalName: "Bone Slash",
-            neutralSpecialName: "Cursed Bolt (Ranged)", upSpecialName: "Death Dive",
-            downSpecialName: "Undead Guard (Counter)", superName: "Soul Harvest",
-            runSpeed: 5.8, jumpForce: 16, baseDamage: 11, projectileDamage: 13,
-            upSpecialDamage: 13, counterDamage: 19, superDamage: 32,
-        },
-        attackEffect: { src: "/fighter2d/effects/Armored Skeleton-Attack02_Effect.png", frames: 9, hold: 3 },
-    },
-    {
-        id: "swordsman",
-        name: "Swordsman",
-        color: "#e67e22",
-        sprites: charSprites("Swordsman", {
-            idle: ["Swordsman-Idle.png", 6], run: ["Swordsman-Walk.png", 8],
-            attack: ["Swordsman-Attack01.png", 7], takeHit: ["Swordsman-Hurt.png", 5],
-            death: ["Swordsman-Death.png", 4],
-        }),
-        moveSet: {
-            name: "Swordsman", normalName: "Swift Cut",
-            neutralSpecialName: "Blade Wave (Ranged)", upSpecialName: "Rising Slash",
-            downSpecialName: "Parry (Counter)", superName: "Thousand Cuts",
-            runSpeed: 6.4, jumpForce: 17, baseDamage: 12, projectileDamage: 11,
-            upSpecialDamage: 13, counterDamage: 17, superDamage: 33,
-        },
-        attackEffect: { src: "/fighter2d/effects/Swordsman-Attack01_Effect.png", frames: 7, hold: 3 },
-    },
-    {
-        id: "priest",
-        name: "Priest",
-        color: "#f1c40f",
-        sprites: charSprites("Priest", {
-            idle: ["Priest-Idle.png", 6], run: ["Priest-Walk.png", 8],
-            attack: ["Priest-Attack.png", 9], takeHit: ["Priest-Hurt.png", 4], death: ["Priest-Death.png", 4],
-        }),
-        moveSet: {
-            name: "Priest", normalName: "Holy Strike",
-            neutralSpecialName: "Smite (Ranged)", upSpecialName: "Ascension",
-            downSpecialName: "Divine Shield (Counter)", superName: "Holy Smite",
-            runSpeed: 5.2, jumpForce: 16, baseDamage: 9, projectileDamage: 14,
-            upSpecialDamage: 10, counterDamage: 24, superDamage: 36,
-        },
-        attackEffect: { src: "/fighter2d/effects/Priest-Attack_effect.png", frames: 5, hold: 4 },
-    },
-];
+const CHARACTER_ROSTER: CharacterDef[] = GRUDA_ROSTER.map(grudaToCharDef);
 
 function clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
