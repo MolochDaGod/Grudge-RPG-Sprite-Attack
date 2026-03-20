@@ -116,53 +116,148 @@ const P2_CONTROLS = {
     down: "arrowdown",
 };
 
-const player1Sprites: FighterSpriteSet = {
-    idle: { src: "/fighter2d/image/player1/Idle.png", frames: 11, hold: 5, loop: true },
-    run: { src: "/fighter2d/image/player1/Run.png", frames: 8, hold: 4, loop: true },
-    jump: { src: "/fighter2d/image/player1/Jump.png", frames: 3, hold: 6, loop: false },
-    fall: { src: "/fighter2d/image/player1/Fall.png", frames: 3, hold: 6, loop: false },
-    attack: { src: "/fighter2d/image/player1/Attack2.png", frames: 7, hold: 4, loop: false },
-    takeHit: { src: "/fighter2d/image/player1/Take Hit.png", frames: 4, hold: 5, loop: false },
-    death: { src: "/fighter2d/image/player1/Death.png", frames: 11, hold: 6, loop: false },
-};
+// ─── Character Roster (GrudgeRPG 100x100 sprites) ───────────────────────
 
-const player2Sprites: FighterSpriteSet = {
-    idle: { src: "/fighter2d/image/player2/Idle.png", frames: 10, hold: 5, loop: true },
-    run: { src: "/fighter2d/image/player2/Run.png", frames: 8, hold: 4, loop: true },
-    jump: { src: "/fighter2d/image/player2/Jump.png", frames: 3, hold: 6, loop: false },
-    fall: { src: "/fighter2d/image/player2/Fall.png", frames: 3, hold: 6, loop: false },
-    attack: { src: "/fighter2d/image/player2/Attack3.png", frames: 8, hold: 4, loop: false },
-    takeHit: { src: "/fighter2d/image/player2/Take hit.png", frames: 3, hold: 5, loop: false },
-    death: { src: "/fighter2d/image/player2/Death.png", frames: 7, hold: 6, loop: false },
-};
+interface CharacterDef {
+    id: string;
+    name: string;
+    sprites: FighterSpriteSet;
+    moveSet: CharacterMoveSet;
+    color: string;
+}
 
-const roninMoveSet: CharacterMoveSet = {
-    name: "Ronin Vanguard",
-    normalName: "Steel Arc",
-    neutralSpecialName: "Tempest Edge (Ranged)",
-    upSpecialName: "Skybreaker Dash",
-    downSpecialName: "Iron Reversal (Counter)",
-    runSpeed: 6.2,
-    jumpForce: 16.5,
-    baseDamage: 11,
-    projectileDamage: 14,
-    upSpecialDamage: 12,
-    counterDamage: 18,
-};
+function charSprites(folder: string, config: {
+    idle: [string, number]; run: [string, number]; attack: [string, number];
+    takeHit: [string, number]; death: [string, number];
+}): FighterSpriteSet {
+    const base = `/fighter2d/characters/${folder}/`;
+    return {
+        idle:    { src: base + config.idle[0],    frames: config.idle[1],    hold: 6, loop: true },
+        run:     { src: base + config.run[0],     frames: config.run[1],     hold: 5, loop: true },
+        jump:    { src: base + config.idle[0],    frames: config.idle[1],    hold: 6, loop: false }, // reuse idle as jump
+        fall:    { src: base + config.idle[0],    frames: config.idle[1],    hold: 6, loop: false }, // reuse idle as fall
+        attack:  { src: base + config.attack[0],  frames: config.attack[1],  hold: 4, loop: false },
+        takeHit: { src: base + config.takeHit[0], frames: config.takeHit[1], hold: 5, loop: false },
+        death:   { src: base + config.death[0],   frames: config.death[1],   hold: 7, loop: false },
+    };
+}
 
-const assassinMoveSet: CharacterMoveSet = {
-    name: "Shade Wraith",
-    normalName: "Phantom Claw",
-    neutralSpecialName: "Shadow Bolt (Ranged)",
-    upSpecialName: "Nightstep Dash",
-    downSpecialName: "Mirror Trap (Counter)",
-    runSpeed: 6.6,
-    jumpForce: 17.2,
-    baseDamage: 10,
-    projectileDamage: 13,
-    upSpecialDamage: 11,
-    counterDamage: 20,
-};
+const CHARACTER_ROSTER: CharacterDef[] = [
+    {
+        id: "knight",
+        name: "Knight",
+        color: "#e74c3c",
+        sprites: charSprites("Knight", {
+            idle: ["Knight-Idle.png", 6], run: ["Knight-Walk.png", 8],
+            attack: ["Knight-Attack03.png", 11], takeHit: ["Knight-Hurt.png", 4], death: ["Knight-Death.png", 4],
+        }),
+        moveSet: {
+            name: "Knight", normalName: "Broadsword Slash",
+            neutralSpecialName: "Shield Throw (Ranged)", upSpecialName: "Skyward Cleave",
+            downSpecialName: "Iron Bulwark (Counter)",
+            runSpeed: 5.6, jumpForce: 16, baseDamage: 13, projectileDamage: 10,
+            upSpecialDamage: 14, counterDamage: 20,
+        },
+    },
+    {
+        id: "archer",
+        name: "Archer",
+        color: "#27ae60",
+        sprites: charSprites("Archer", {
+            idle: ["Archer-Idle.png", 6], run: ["Archer-Walk.png", 8],
+            attack: ["Archer-Attack02.png", 12], takeHit: ["Archer-Hurt.png", 4], death: ["Archer-Death.png", 4],
+        }),
+        moveSet: {
+            name: "Archer", normalName: "Quick Shot",
+            neutralSpecialName: "Piercing Arrow (Ranged)", upSpecialName: "Aerial Volley",
+            downSpecialName: "Evade Counter",
+            runSpeed: 6.8, jumpForce: 17.5, baseDamage: 9, projectileDamage: 15,
+            upSpecialDamage: 11, counterDamage: 16,
+        },
+    },
+    {
+        id: "wizard",
+        name: "Wizard",
+        color: "#8e44ad",
+        sprites: charSprites("Wizard", {
+            idle: ["Wizard-Idle.png", 6], run: ["Wizard-Walk.png", 8],
+            attack: ["Wizard-Attack01.png", 6], takeHit: ["Wizard-Hurt.png", 4], death: ["Wizard-DEATH.png", 4],
+        }),
+        moveSet: {
+            name: "Wizard", normalName: "Arcane Blast",
+            neutralSpecialName: "Fireball (Ranged)", upSpecialName: "Teleport Strike",
+            downSpecialName: "Mana Shield (Counter)",
+            runSpeed: 5.4, jumpForce: 16.5, baseDamage: 10, projectileDamage: 16,
+            upSpecialDamage: 12, counterDamage: 22,
+        },
+    },
+    {
+        id: "orc",
+        name: "Orc",
+        color: "#2ecc71",
+        sprites: charSprites("Orc", {
+            idle: ["Orc-Idle.png", 6], run: ["Orc-Walk.png", 8],
+            attack: ["Orc-Attack01.png", 6], takeHit: ["Orc-Hurt.png", 4], death: ["Orc-Death.png", 4],
+        }),
+        moveSet: {
+            name: "Orc", normalName: "Axe Swing",
+            neutralSpecialName: "Boulder Toss (Ranged)", upSpecialName: "Leap Slam",
+            downSpecialName: "Berserker Rage (Counter)",
+            runSpeed: 5.0, jumpForce: 15, baseDamage: 15, projectileDamage: 12,
+            upSpecialDamage: 16, counterDamage: 18,
+        },
+    },
+    {
+        id: "skeleton",
+        name: "Armored Skeleton",
+        color: "#95a5a6",
+        sprites: charSprites("Armored-Skeleton", {
+            idle: ["Armored Skeleton-Idle.png", 6], run: ["Armored Skeleton-Walk.png", 8],
+            attack: ["Armored Skeleton-Attack02.png", 9], takeHit: ["Armored Skeleton-Hurt.png", 4],
+            death: ["Armored Skeleton-Death.png", 4],
+        }),
+        moveSet: {
+            name: "Armored Skeleton", normalName: "Bone Slash",
+            neutralSpecialName: "Cursed Bolt (Ranged)", upSpecialName: "Death Dive",
+            downSpecialName: "Undead Guard (Counter)",
+            runSpeed: 5.8, jumpForce: 16, baseDamage: 11, projectileDamage: 13,
+            upSpecialDamage: 13, counterDamage: 19,
+        },
+    },
+    {
+        id: "swordsman",
+        name: "Swordsman",
+        color: "#e67e22",
+        sprites: charSprites("Swordsman", {
+            idle: ["Swordsman-Idle.png", 6], run: ["Swordsman-Walk.png", 8],
+            attack: ["Swordsman-Attack01.png", 7], takeHit: ["Swordsman-Hurt.png", 5],
+            death: ["Swordsman-Death.png", 4],
+        }),
+        moveSet: {
+            name: "Swordsman", normalName: "Swift Cut",
+            neutralSpecialName: "Blade Wave (Ranged)", upSpecialName: "Rising Slash",
+            downSpecialName: "Parry (Counter)",
+            runSpeed: 6.4, jumpForce: 17, baseDamage: 12, projectileDamage: 11,
+            upSpecialDamage: 13, counterDamage: 17,
+        },
+    },
+    {
+        id: "priest",
+        name: "Priest",
+        color: "#f1c40f",
+        sprites: charSprites("Priest", {
+            idle: ["Priest-Idle.png", 6], run: ["Priest-Walk.png", 8],
+            attack: ["Priest-Attack.png", 9], takeHit: ["Priest-Hurt.png", 4], death: ["Priest-Death.png", 4],
+        }),
+        moveSet: {
+            name: "Priest", normalName: "Holy Strike",
+            neutralSpecialName: "Smite (Ranged)", upSpecialName: "Ascension",
+            downSpecialName: "Divine Shield (Counter)",
+            runSpeed: 5.2, jumpForce: 16, baseDamage: 9, projectileDamage: 14,
+            upSpecialDamage: 10, counterDamage: 24,
+        },
+    },
+];
 
 function clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
@@ -319,14 +414,12 @@ function formatTime(seconds: number): string {
 }
 
 export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
+    const [p1Pick, setP1Pick] = useState<CharacterDef | null>(null);
+    const [p2Pick, setP2Pick] = useState<CharacterDef | null>(null);
+    const [selectPhase, setSelectPhase] = useState<"p1" | "p2" | "fight">("p1");
+
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
-    const worldRef = useRef<WorldState>({
-        p1: createInitialFighter("p1", roninMoveSet),
-        p2: createInitialFighter("p2", assassinMoveSet),
-        projectiles: [],
-        winner: null,
-        startedAt: performance.now(),
-    });
+    const worldRef = useRef<WorldState | null>(null);
     const pressedKeysRef = useRef<Set<string>>(new Set());
     const animationFrameRef = useRef<number | null>(null);
     const [isReady, setIsReady] = useState(false);
@@ -340,19 +433,45 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         castle: HTMLImageElement;
     } | null>(null);
 
+    const handleCharacterPick = useCallback((char: CharacterDef) => {
+        if (selectPhase === "p1") {
+            setP1Pick(char);
+            setSelectPhase("p2");
+        } else if (selectPhase === "p2") {
+            setP2Pick(char);
+            setSelectPhase("fight");
+        }
+    }, [selectPhase]);
+
+    const resetToSelect = useCallback(() => {
+        setP1Pick(null);
+        setP2Pick(null);
+        setSelectPhase("p1");
+        setIsReady(false);
+        assetsRef.current = null;
+        worldRef.current = null;
+        setHud({ p1Hp: 100, p2Hp: 100, winner: null, elapsed: 0 });
+        if (animationFrameRef.current !== null) {
+            cancelAnimationFrame(animationFrameRef.current);
+            animationFrameRef.current = null;
+        }
+    }, []);
+
     const resetMatch = useCallback(() => {
+        if (!p1Pick || !p2Pick) return;
         worldRef.current = {
-            p1: createInitialFighter("p1", roninMoveSet),
-            p2: createInitialFighter("p2", assassinMoveSet),
+            p1: createInitialFighter("p1", p1Pick.moveSet),
+            p2: createInitialFighter("p2", p2Pick.moveSet),
             projectiles: [],
             winner: null,
             startedAt: performance.now(),
         };
         setHud({ p1Hp: 100, p2Hp: 100, winner: null, elapsed: 0 });
-    }, []);
+    }, [p1Pick, p2Pick]);
 
     const queueNormalAttack = useCallback((fighterId: FighterId) => {
         const world = worldRef.current;
+        if (!world) return;
         const now = performance.now();
         const actor = fighterId === "p1" ? world.p1 : world.p2;
         if (world.winner || actor.hp <= 0) return;
@@ -377,6 +496,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
     const queueSpecial = useCallback((fighterId: FighterId, kind: SpecialMoveKind) => {
         const world = worldRef.current;
+        if (!world) return;
         const now = performance.now();
         const actor = fighterId === "p1" ? world.p1 : world.p2;
         if (world.winner || actor.hp <= 0) return;
@@ -445,6 +565,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
     const tryJump = useCallback((fighterId: FighterId) => {
         const world = worldRef.current;
+        if (!world) return;
         const now = performance.now();
         const actor = fighterId === "p1" ? world.p1 : world.p2;
         if (world.winner || actor.hp <= 0) return;
@@ -465,11 +586,20 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     }, []);
 
     useEffect(() => {
+        if (selectPhase !== "fight" || !p1Pick || !p2Pick) return;
         let disposed = false;
 
+        worldRef.current = {
+            p1: createInitialFighter("p1", p1Pick.moveSet),
+            p2: createInitialFighter("p2", p2Pick.moveSet),
+            projectiles: [],
+            winner: null,
+            startedAt: performance.now(),
+        };
+
         Promise.all([
-            loadSpriteSet(player1Sprites),
-            loadSpriteSet(player2Sprites),
+            loadSpriteSet(p1Pick.sprites),
+            loadSpriteSet(p2Pick.sprites),
             loadImage("/fighter2d/image/Hills.png"),
             loadImage("/fighter2d/image/castle.png"),
         ])
@@ -486,7 +616,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         return () => {
             disposed = true;
         };
-    }, []);
+    }, [selectPhase, p1Pick, p2Pick]);
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
@@ -544,8 +674,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         ) => {
             const currentSprite = sprites[fighter.state];
             const sourceX = fighter.frameIndex * currentSprite.frameWidth;
-            const drawWidth = currentSprite.frameWidth * 2;
-            const drawHeight = currentSprite.frameHeight * 2;
+            const drawWidth = currentSprite.frameWidth * 3;
+            const drawHeight = currentSprite.frameHeight * 3;
             const drawX = fighter.x - drawWidth / 2;
             const drawY = fighter.y - drawHeight;
 
@@ -861,37 +991,77 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     }, [isReady]);
 
     const winnerLabel = useMemo(() => {
-        if (hud.winner === "p1") return `${roninMoveSet.name} Wins`;
-        if (hud.winner === "p2") return `${assassinMoveSet.name} Wins`;
+        if (hud.winner === "p1") return `${p1Pick?.name ?? "P1"} Wins`;
+        if (hud.winner === "p2") return `${p2Pick?.name ?? "P2"} Wins`;
         return null;
-    }, [hud.winner]);
+    }, [hud.winner, p1Pick, p2Pick]);
 
+    // ─── CHARACTER SELECT SCREEN ─────────────────────────────────
+    if (selectPhase !== "fight") {
+        return (
+            <div className="min-h-screen bg-slate-950 text-white p-4 md:p-6">
+                <div className="max-w-[1100px] mx-auto space-y-6">
+                    <div className="flex items-center gap-3">
+                        <Button variant="ghost" className="text-white/80 hover:text-white" onClick={onBack}>
+                            <ArrowLeft className="w-4 h-4 mr-2" /> Back
+                        </Button>
+                        <Badge className="bg-amber-500/20 text-amber-300 border-amber-300/30">Grudge Fighter</Badge>
+                    </div>
+
+                    <div className="text-center space-y-2">
+                        <h1 className="text-3xl font-bold text-amber-300 font-serif">
+                            {selectPhase === "p1" ? "Player 1 — Choose Your Fighter" : "Player 2 — Choose Your Fighter"}
+                        </h1>
+                        {p1Pick && selectPhase === "p2" && (
+                            <p className="text-white/60">P1 picked <span className="text-emerald-400 font-semibold">{p1Pick.name}</span></p>
+                        )}
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                        {CHARACTER_ROSTER.map((char) => (
+                            <button
+                                key={char.id}
+                                onClick={() => handleCharacterPick(char)}
+                                className="group relative bg-slate-900/80 border border-white/10 rounded-lg p-4 hover:border-amber-400/60 hover:bg-slate-800/80 transition-all text-left"
+                            >
+                                <div className="w-full h-20 flex items-center justify-center mb-3 overflow-hidden">
+                                    <img
+                                        src={char.sprites.idle.src}
+                                        alt={char.name}
+                                        className="h-16 object-contain" style={{ imageRendering: "pixelated" }}
+                                    />
+                                </div>
+                                <div className="text-center">
+                                    <div className="font-semibold text-white group-hover:text-amber-300 transition-colors">{char.name}</div>
+                                    <div className="text-xs text-white/50 mt-1">
+                                        ATK {char.moveSet.baseDamage} · SPD {char.moveSet.runSpeed.toFixed(1)}
+                                    </div>
+                                </div>
+                                <div className="absolute top-2 right-2 w-3 h-3 rounded-full" style={{ backgroundColor: char.color }} />
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // ─── FIGHT SCREEN ────────────────────────────────────────────
     return (
         <div className="min-h-screen bg-slate-950 text-white p-4 md:p-6">
             <div className="max-w-[1300px] mx-auto space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                    <Button
-                        variant="ghost"
-                        className="text-white/80 hover:text-white hover:bg-white/10"
-                        onClick={onBack}
-                        data-testid="button-back-from-grudge-fighter"
-                    >
-                        <ArrowLeft className="w-4 h-4 mr-2" />
-                        Back To Menu
+                    <Button variant="ghost" className="text-white/80 hover:text-white hover:bg-white/10" onClick={onBack}>
+                        <ArrowLeft className="w-4 h-4 mr-2" /> Back To Menu
                     </Button>
-
                     <div className="flex items-center gap-2">
-                        <Badge className="bg-amber-500/20 text-amber-300 border-amber-300/30">
-                            Grudge Fighter Mode
-                        </Badge>
-                        <Badge variant="outline" className="border-white/30 text-white/90">
-                            Match Time {formatTime(hud.elapsed)}
-                        </Badge>
+                        <Badge className="bg-amber-500/20 text-amber-300 border-amber-300/30">Grudge Fighter</Badge>
+                        <Badge variant="outline" className="border-white/30 text-white/90">Match Time {formatTime(hud.elapsed)}</Badge>
                     </div>
-
-                    <Button onClick={resetMatch} variant="secondary" data-testid="button-reset-grudge-fighter">
-                        Rematch
-                    </Button>
+                    <div className="flex gap-2">
+                        <Button onClick={resetMatch} variant="secondary">Rematch</Button>
+                        <Button onClick={resetToSelect} variant="outline" className="border-white/20 text-white/70">New Fighters</Button>
+                    </div>
                 </div>
 
                 {loadError && (
@@ -903,49 +1073,34 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 <Card className="relative overflow-hidden border-white/10 bg-slate-900/80">
                     <div className="p-4 border-b border-white/10 flex flex-wrap items-center gap-4 justify-between">
                         <div className="min-w-[260px]">
-                            <div className="text-sm text-white/70 mb-1">Player 1: {roninMoveSet.name}</div>
+                            <div className="text-sm text-white/70 mb-1" style={{ color: p1Pick?.color }}>P1: {p1Pick?.name}</div>
                             <div className="grid grid-cols-10 gap-1">
                                 {Array.from({ length: 10 }, (_, idx) => (
-                                    <div
-                                        key={`p1-hp-${idx}`}
-                                        className={`h-3 rounded-sm ${idx < Math.ceil(hud.p1Hp / 10) ? "bg-emerald-500" : "bg-white/10"}`}
-                                    />
+                                    <div key={`p1-hp-${idx}`} className={`h-3 rounded-sm ${idx < Math.ceil(hud.p1Hp / 10) ? "bg-emerald-500" : "bg-white/10"}`} />
                                 ))}
                             </div>
                         </div>
-
                         <div className="min-w-[260px]">
-                            <div className="text-sm text-white/70 mb-1 text-right">Player 2: {assassinMoveSet.name}</div>
+                            <div className="text-sm text-white/70 mb-1 text-right" style={{ color: p2Pick?.color }}>P2: {p2Pick?.name}</div>
                             <div className="grid grid-cols-10 gap-1">
                                 {Array.from({ length: 10 }, (_, idx) => (
-                                    <div
-                                        key={`p2-hp-${idx}`}
-                                        className={`h-3 rounded-sm ${idx < Math.ceil(hud.p2Hp / 10) ? "bg-sky-400" : "bg-white/10"}`}
-                                    />
+                                    <div key={`p2-hp-${idx}`} className={`h-3 rounded-sm ${idx < Math.ceil(hud.p2Hp / 10) ? "bg-sky-400" : "bg-white/10"}`} />
                                 ))}
                             </div>
                         </div>
                     </div>
 
-                    <canvas
-                        ref={canvasRef}
-                        width={ARENA_WIDTH}
-                        height={ARENA_HEIGHT}
-                        className="w-full h-auto max-h-[70vh] block bg-black"
-                        data-testid="grudge-fighter-canvas"
-                    />
+                    <canvas ref={canvasRef} width={ARENA_WIDTH} height={ARENA_HEIGHT} className="w-full h-auto max-h-[70vh] block bg-black" />
 
                     {!isReady && !loadError && (
-                        <div className="absolute inset-0 bg-black/60 grid place-items-center text-white/80 text-lg">
-                            Loading sprites and animation sheets...
-                        </div>
+                        <div className="absolute inset-0 bg-black/60 grid place-items-center text-white/80 text-lg">Loading sprites...</div>
                     )}
 
                     {winnerLabel && (
                         <div className="absolute inset-0 bg-black/65 grid place-items-center">
                             <Card className="p-8 bg-slate-900/95 border-amber-400/40 text-center">
                                 <h2 className="text-3xl font-bold text-amber-300">{winnerLabel}</h2>
-                                <p className="text-white/70 mt-2">Fight complete. Press rematch to restart instantly.</p>
+                                <p className="text-white/70 mt-2">Fight complete. Press Rematch or pick New Fighters.</p>
                             </Card>
                         </div>
                     )}
@@ -954,44 +1109,29 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 <div className="grid md:grid-cols-2 gap-4">
                     <Card className="p-4 bg-slate-900/70 border-emerald-400/20">
                         <div className="font-semibold mb-2 flex items-center gap-2 text-emerald-300">
-                            <Crosshair className="w-4 h-4" />
-                            P1 Controls (Ronin)
+                            <Crosshair className="w-4 h-4" /> P1: {p1Pick?.name}
                         </div>
                         <div className="text-sm text-white/80 space-y-1">
                             <div>A / D: move, W: jump</div>
-                            <div>Q: normal attack ({roninMoveSet.normalName})</div>
-                            <div>E: neutral special ({roninMoveSet.neutralSpecialName})</div>
-                            <div>W + E: up special ({roninMoveSet.upSpecialName})</div>
-                            <div>S + E: down special ({roninMoveSet.downSpecialName})</div>
+                            <div>Q: {p1Pick?.moveSet.normalName}</div>
+                            <div>E: {p1Pick?.moveSet.neutralSpecialName}</div>
+                            <div>W+E: {p1Pick?.moveSet.upSpecialName}</div>
+                            <div>S+E: {p1Pick?.moveSet.downSpecialName}</div>
                         </div>
                     </Card>
-
                     <Card className="p-4 bg-slate-900/70 border-sky-400/20">
                         <div className="font-semibold mb-2 flex items-center gap-2 text-sky-300">
-                            <Zap className="w-4 h-4" />
-                            P2 Controls (Wraith)
+                            <Zap className="w-4 h-4" /> P2: {p2Pick?.name}
                         </div>
                         <div className="text-sm text-white/80 space-y-1">
-                            <div>Arrow Left / Right: move, Arrow Up: jump</div>
-                            <div>/ : normal attack ({assassinMoveSet.normalName})</div>
-                            <div>. : neutral special ({assassinMoveSet.neutralSpecialName})</div>
-                            <div>Arrow Up + . : up special ({assassinMoveSet.upSpecialName})</div>
-                            <div>Arrow Down + . : down special ({assassinMoveSet.downSpecialName})</div>
+                            <div>Arrow keys: move + jump</div>
+                            <div>/: {p2Pick?.moveSet.normalName}</div>
+                            <div>.: {p2Pick?.moveSet.neutralSpecialName}</div>
+                            <div>Up+.: {p2Pick?.moveSet.upSpecialName}</div>
+                            <div>Down+.: {p2Pick?.moveSet.downSpecialName}</div>
                         </div>
                     </Card>
                 </div>
-
-                <Card className="p-4 bg-slate-900/70 border-amber-400/20 text-sm text-white/75">
-                    <div className="font-semibold mb-2 flex items-center gap-2 text-amber-300">
-                        <Shield className="w-4 h-4" />
-                        Combat Notes
-                    </div>
-                    <div>
-                        All reference fighter animations are used in this mode: idle, run, jump, fall, attack, take hit, and death.
-                        Directional specials are mapped in a Smash-like style with neutral, up, and down variants. Down specials open a brief
-                        counter window, while neutral specials fire ranged attacks and up specials perform airborne dash strikes.
-                    </div>
-                </Card>
             </div>
         </div>
     );
