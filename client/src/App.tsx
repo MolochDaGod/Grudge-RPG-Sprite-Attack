@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -5,9 +6,22 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { PuterAuthProvider } from "@/contexts/PuterAuthContext";
 import GrudgeFighter2D from "@/pages/GrudgeFighter2D";
+import ToonAdmin from "@/pages/ToonAdmin";
 
 function GameApp() {
-  // Launch directly into the 2D fighter — no login, no tutorial
+  const [route, setRoute] = useState(window.location.hash);
+
+  useEffect(() => {
+    const onHash = () => setRoute(window.location.hash);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  // /toonadmin route
+  if (route === "#toonadmin" || route === "#/toonadmin") {
+    return <ToonAdmin onBack={() => { window.location.hash = ""; }} />;
+  }
+
   return <GrudgeFighter2D onBack={() => window.location.reload()} />;
 }
 
