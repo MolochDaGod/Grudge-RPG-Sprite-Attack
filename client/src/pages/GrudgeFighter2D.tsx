@@ -947,21 +947,79 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         }
     }, [vsAI, tryJump, queueNormalAttack, queueSpecial, queueSuper, queueDashAttack, queueBlock]);
 
+    // In PvP, determine which fighter this client controls
+    const myFighter: FighterId = pvp.mySlot === "p2" ? "p2" : "p1";
+    const isOnline = pvp.state === "fighting";
+
+    // Handle remote PvP actions from opponent
+    const remoteKeysRef = useRef<Set<string>>(new Set());
+
+    useEffect(() => {
+        if (!isOnline) return;
+        const opponentSlot: FighterId = myFighter === "p1" ? "p2" : "p1";
+        const opponentControls = opponentSlot === "p1" ? P1_CONTROLS : P2_CONTROLS;
+
+        pvp.onRemoteInput((data) => {
+            // Store remote keys separately — do NOT mix with local pressedKeys
+            remoteKeysRef.current = new Set(data.keys);
+        });
+
+        pvp.onRemoteAction((data) => {
+            const a = data.action;
+            if (a === "attack") queueNormalAttack(opponentSlot);
+            else if (a === "dash") queueDashAttack(opponentSlot);
+            else if (a === "block") queueBlock(opponentSlot);
+            else if (a === "jump") tryJump(opponentSlot);
+            else if (a === "super") queueSuper(opponentSlot);
+            else if (a === "ranged") queueSpecial(opponentSlot, "neutral");
+            else if (a === "up-special") queueSpecial(opponentSlot, "up");
+            else if (a === "down-special") queueSpecial(opponentSlot, "down");
+        });
+    }, [isOnline, myFighter, pvp, queueNormalAttack, queueDashAttack, queueBlock, tryJump, queueSuper, queueSpecial]);
+
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
             const key = e.key.toLowerCase(); pressedKeysRef.current.add(key);
             if (e.repeat) return;
-            processInput("p1", P1_CONTROLS, key);
-            if (!vsAI) processInput("p2", P2_CONTROLS, key);
-        };
-        const onKeyUp = (e: KeyboardEvent) => pressedKeysRef.current.delete(e.key.toLowerCase());
 
-        // Mouse: LMB = dash attack, RMB = block/parry (P1 only)
-        const onMouseDown = (e: MouseEvent) => {
-            if (e.button === 0) queueDashAttack("p1");   // LMB
-            if (e.button === 2) queueBlock("p1");         // RMB
+            if (isOnline) {
+                // In PvP: always use P1 controls, mapped to our assigned slot
+                processInput(myFighter, P1_CONTROLS, key);
+                // Send action to opponent
+                if (key === P1_CONTROLS.attack1 || key === P1_CONTROLS.attack2) {
+                    const up = pressedKeysRef.current.has(P1_CONTROLS.jump);
+                    const down = pressedKeysRef.current.has(P1_CONTROLS.down);
+                    if (up) pvp.sendAction("up-special");
+                    else if (down) pvp.sendAction("down-special");
+                    else pvp.sendAction("attack");
+                }
+                if (key === P1_CONTROLS.ranged) pvp.sendAction("ranged");
+                if (key === P1_CONTROLS.super) pvp.sendAction("super");
+                if (key === P1_CONTROLS.jump) pvp.sendAction("jump");
+                // Send movement keys
+                pvp.sendInput([...pressedKeysRef.current].filter(k =>
+                    k === P1_CONTROLS.left || k === P1_CONTROLS.right || k === P1_CONTROLS.jump || k === P1_CONTROLS.down
+                ));
+            } else {
+                processInput("p1", P1_CONTROLS, key);
+                if (!vsAI) processInput("p2", P2_CONTROLS, key);
+            }
         };
-        const onContextMenu = (e: MouseEvent) => e.preventDefault(); // disable right-click menu
+        const onKeyUp = (e: KeyboardEvent) => {
+            pressedKeysRef.current.delete(e.key.toLowerCase());
+            if (isOnline) {
+                pvp.sendInput([...pressedKeysRef.current].filter(k =>
+                    k === P1_CONTROLS.left || k === P1_CONTROLS.right || k === P1_CONTROLS.jump || k === P1_CONTROLS.down
+                ));
+            }
+        };
+
+        // Mouse: LMB = dash attack, RMB = block/parry
+        const onMouseDown = (e: MouseEvent) => {
+            if (e.button === 0) { queueDashAttack(isOnline ? myFighter : "p1"); if (isOnline) pvp.sendAction("dash"); }
+            if (e.button === 2) { queueBlock(isOnline ? myFighter : "p1"); if (isOnline) pvp.sendAction("block"); }
+        };
+        const onContextMenu = (e: MouseEvent) => e.preventDefault();
 
         window.addEventListener("keydown", onKeyDown);
         window.addEventListener("keyup", onKeyUp);
@@ -974,7 +1032,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             window.removeEventListener("contextmenu", onContextMenu);
             pressedKeysRef.current.clear();
         };
-    }, [processInput, vsAI, queueDashAttack, queueBlock]);
+    }, [processInput, vsAI, queueDashAttack, queueBlock, isOnline, myFighter, pvp]);
 
     useEffect(() => {
         if (selectPhase !== "fight" || !p1Pick || !p2Pick) return;
@@ -1485,10 +1543,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             fighter: FighterRuntime,
             opponent: FighterRuntime,
             controls: typeof P1_CONTROLS | typeof P2_CONTROLS,
-            now: number
+            now: number,
+            keySource?: Set<string>
         ): FighterRuntime => {
             const isLocked = now < fighter.stateLockUntil;
-            const keys = pressedKeysRef.current;
+            const keys = keySource ?? pressedKeysRef.current;
             const leftPressed = keys.has(controls.left);
             const rightPressed = keys.has(controls.right);
 
@@ -1634,8 +1693,25 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             };
             world = { ...world, p1: regenFighter(world.p1), p2: regenFighter(world.p2) };
 
-            let nextP1 = updateMovement(world.p1, world.p2, P1_CONTROLS, now);
-            let nextP2 = updateMovement(world.p2, world.p1, P2_CONTROLS, now);
+            // In online PvP:
+            // - Local player's keys are in pressedKeysRef (P1_CONTROLS)
+            // - Remote player's keys are in remoteKeysRef (also P1_CONTROLS since both clients use WASD)
+            // - Each fighter reads from the correct key source
+            let nextP1: FighterRuntime;
+            let nextP2: FighterRuntime;
+            if (isOnline) {
+                const localKeys = pressedKeysRef.current;
+                const remoteKeys = remoteKeysRef.current;
+                nextP1 = myFighter === "p1"
+                    ? updateMovement(world.p1, world.p2, P1_CONTROLS, now, localKeys)
+                    : updateMovement(world.p1, world.p2, P1_CONTROLS, now, remoteKeys);
+                nextP2 = myFighter === "p2"
+                    ? updateMovement(world.p2, world.p1, P1_CONTROLS, now, localKeys)
+                    : updateMovement(world.p2, world.p1, P1_CONTROLS, now, remoteKeys);
+            } else {
+                nextP1 = updateMovement(world.p1, world.p2, P1_CONTROLS, now);
+                nextP2 = updateMovement(world.p2, world.p1, P2_CONTROLS, now);
+            }
 
             nextP1 = tickFighterAnimation(nextP1, assets.p1, now);
             nextP2 = tickFighterAnimation(nextP2, assets.p2, now);

@@ -42,55 +42,81 @@ export function MainMenu({
 
   return (
     <div className="min-h-screen relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-        <div className="absolute inset-0 opacity-20">
-          <div className="absolute top-20 left-20 w-96 h-96 bg-primary/30 rounded-full blur-3xl" />
-          <div className="absolute bottom-20 right-20 w-80 h-80 bg-accent/30 rounded-full blur-3xl" />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-purple-500/10 rounded-full blur-3xl" />
-        </div>
-        
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.5)_100%)]" />
+      {/* Full-screen campfire background */}
+      <div className="absolute inset-0">
+        <img
+          src="/landing-bg.jpg"
+          alt=""
+          className="w-full h-full object-cover"
+        />
+        {/* Dark overlay for readability */}
+        <div className="absolute inset-0 bg-black/50" />
+        {/* Vignette */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_30%,rgba(0,0,0,0.75)_100%)]" />
+        {/* Gold ambient glow from campfire area */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_70%,rgba(212,175,55,0.08)_0%,transparent_50%)]" />
       </div>
 
+      {/* Top bar */}
       <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
         <UserMenu />
         <Button
           size="icon"
           variant="ghost"
           onClick={toggleTheme}
-          className="text-white/80 hover:text-white hover:bg-white/10"
+          className="text-white/80 hover:text-white hover:bg-white/10 backdrop-blur-sm"
           data-testid="button-theme-toggle"
         >
           {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
         </Button>
       </div>
 
+      {/* Main content */}
       <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-4">
+        {/* Title block */}
         <motion.div
           initial={{ opacity: 0, y: -30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          className="text-center mb-12"
+          transition={{ duration: 0.8 }}
+          className="text-center mb-10"
         >
-          <div className="flex items-center justify-center gap-3 mb-4">
-            <Swords className="w-10 h-10 md:w-14 md:h-14 text-primary" />
-            <h1 className="font-serif text-5xl md:text-7xl font-bold text-white tracking-wide">
-              TETHICAL
-            </h1>
-            <Shield className="w-10 h-10 md:w-14 md:h-14 text-primary" />
-          </div>
-          <p className="text-lg md:text-xl text-white/60 font-light tracking-widest uppercase">
-            Tactical Strategy in a Fractured World
-          </p>
-          
+          <h1 className="font-serif text-6xl md:text-8xl font-black tracking-wider gold-text text-shadow-gold drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]">
+            GRUDGES
+          </h1>
+          <motion.p
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.3, duration: 0.5 }}
+            className="font-display text-2xl md:text-4xl tracking-[0.3em] uppercase mt-1"
+            style={{ color: "hsl(0 70% 45%)" }}
+          >
+            ALPHA
+          </motion.p>
+
+          <motion.div
+            initial={{ scaleX: 0 }}
+            animate={{ scaleX: 1 }}
+            transition={{ delay: 0.5, duration: 0.6 }}
+            className="mx-auto mt-4 h-px w-48 bg-gradient-to-r from-transparent via-[hsl(43_85%_55%)] to-transparent"
+          />
+
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.6 }}
+            className="text-sm md:text-base text-[hsl(45_30%_75%)] font-body tracking-widest uppercase mt-3"
+          >
+            Settle the score. Forge your legacy.
+          </motion.p>
+
           {battlesWon > 0 && (
             <motion.div
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.3 }}
+              transition={{ delay: 0.7 }}
               className="mt-4"
             >
-              <Badge className="bg-primary/20 text-primary border border-primary/30 text-sm px-4 py-1">
+              <Badge className="bg-black/40 text-[hsl(43_85%_60%)] border border-[hsl(43_60%_30%)] text-sm px-4 py-1 backdrop-blur-sm">
                 <Trophy className="w-4 h-4 mr-2" />
                 {battlesWon} Battles Won
               </Badge>
@@ -98,157 +124,135 @@ export function MainMenu({
           )}
         </motion.div>
 
+        {/* Menu buttons */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.2 }}
-          className="w-full max-w-md space-y-4"
+          transition={{ duration: 0.6, delay: 0.4 }}
+          className="w-full max-w-md space-y-3"
         >
-          <Button
+          {/* Primary CTA — gilded gold */}
+          <button
             onClick={onStartBattle}
-            size="lg"
-            className="w-full h-14 text-lg font-serif relative overflow-hidden group"
+            className="gilded-button w-full h-14 text-lg flex items-center justify-center gap-2 group"
             data-testid="button-start-battle"
           >
-            <div className="absolute inset-0 bg-gradient-to-r from-primary via-primary to-amber-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <span className="relative flex items-center gap-2">
-              <Play className="w-5 h-5" />
-              Start Battle
-              <Sparkles className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-            </span>
-          </Button>
+            <Play className="w-5 h-5" />
+            Enter the Fray
+            <Sparkles className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </button>
 
           {onViewCharacterSelect && (
-            <Button
+            <button
               onClick={onViewCharacterSelect}
-              size="lg"
-              className="w-full h-12 font-serif relative overflow-hidden group bg-purple-600"
+              className="dark-button w-full h-12 flex items-center justify-center gap-2"
               data-testid="button-create-character"
             >
-              <div className="absolute inset-0 bg-gradient-to-r from-purple-600 via-purple-500 to-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-              <span className="relative flex items-center gap-2">
-                <UserPlus className="w-5 h-5" />
-                Create Character
-                <Sparkles className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </span>
-            </Button>
+              <UserPlus className="w-5 h-5" />
+              Create Character
+            </button>
           )}
 
           <div className="grid grid-cols-2 gap-3">
-            <Button
+            <button
               onClick={onViewRoster}
-              variant="secondary"
-              size="lg"
-              className="h-12 font-serif bg-white/10 hover:bg-white/20 text-white border-white/20"
+              className="dark-button h-12 flex items-center justify-center gap-2 text-sm"
               data-testid="button-view-roster"
             >
-              <Users className="w-5 h-5 mr-2" />
+              <Users className="w-4 h-4" />
               Roster
-            </Button>
-            
-            <Button
+            </button>
+
+            <button
               onClick={onViewCodex}
-              variant="secondary"
-              size="lg"
-              className="h-12 font-serif bg-white/10 hover:bg-white/20 text-white border-white/20"
+              className="dark-button h-12 flex items-center justify-center gap-2 text-sm"
               data-testid="button-view-codex"
             >
-              <Book className="w-5 h-5 mr-2" />
+              <Book className="w-4 h-4" />
               Codex
-            </Button>
+            </button>
           </div>
 
           {onViewSkillTrees && (
-            <Button
+            <button
               onClick={onViewSkillTrees}
-              variant="secondary"
-              size="lg"
-              className="w-full h-12 font-serif bg-green-600/80 hover:bg-green-500/80 text-white border-green-400/20"
+              className="dark-button w-full h-12 flex items-center justify-center gap-2"
+              style={{ borderColor: "hsl(142 60% 30%)" }}
               data-testid="button-view-skill-trees"
             >
-              <TreeDeciduous className="w-5 h-5 mr-2" />
-              Skill Trees
-            </Button>
+              <TreeDeciduous className="w-5 h-5" style={{ color: "hsl(142 71% 45%)" }} />
+              <span style={{ color: "hsl(142 71% 55%)" }}>Skill Trees</span>
+            </button>
           )}
 
           {onStartGrudgeFighter && (
-            <Button
+            <button
               onClick={onStartGrudgeFighter}
-              variant="secondary"
-              size="lg"
-              className="w-full h-12 font-serif bg-amber-600/80 hover:bg-amber-500/80 text-slate-950 border-amber-300/30"
+              className="gilded-button w-full h-12 flex items-center justify-center gap-2 text-sm"
               data-testid="button-start-grudge-fighter"
             >
-              <Swords className="w-5 h-5 mr-2" />
+              <Swords className="w-5 h-5" />
               Grudge Fighter (2D)
-            </Button>
+            </button>
           )}
 
           {onViewAdmin && (
-            <Button
+            <button
               onClick={onViewAdmin}
-              variant="secondary"
-              size="lg"
-              className="w-full h-10 font-serif bg-white/5 hover:bg-white/15 text-white/70 border-white/10"
+              className="dark-button w-full h-10 flex items-center justify-center gap-2 text-xs opacity-70 hover:opacity-100 transition-opacity"
               data-testid="button-view-admin"
             >
-              <Wrench className="w-4 h-4 mr-2" />
+              <Wrench className="w-4 h-4" />
               Admin: Sprite & Weapon Editor
-            </Button>
+            </button>
           )}
 
           {onViewSpriteAssistant && (
-            <Button
+            <button
               onClick={onViewSpriteAssistant}
-              variant="secondary"
-              size="lg"
-              className="w-full h-10 font-serif bg-blue-600/70 hover:bg-blue-500/70 text-white border-blue-400/20"
+              className="dark-button w-full h-10 flex items-center justify-center gap-2 text-xs"
+              style={{ borderColor: "hsl(220 60% 35%)" }}
               data-testid="button-view-sprite-assistant"
             >
-              <Database className="w-4 h-4 mr-2" />
-              Sprite API Assistant
-            </Button>
+              <Database className="w-4 h-4" style={{ color: "hsl(220 60% 55%)" }} />
+              <span style={{ color: "hsl(220 60% 65%)" }}>Sprite API Assistant</span>
+            </button>
           )}
 
           {onViewChat && (
-            <Button
+            <button
               onClick={onViewChat}
-              size="lg"
-              className="w-full font-serif relative overflow-hidden group bg-emerald-600"
+              className="dark-button w-full h-11 flex items-center justify-center gap-2 group"
+              style={{ borderColor: "hsl(160 50% 25%)" }}
               data-testid="button-view-chat"
             >
-              <div className="absolute inset-0 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-              <span className="relative flex items-center gap-2">
-                <Bot className="w-5 h-5" />
-                AI Assistant
-                <Sparkles className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </span>
-            </Button>
+              <Bot className="w-5 h-5" style={{ color: "hsl(160 60% 50%)" }} />
+              <span style={{ color: "hsl(160 60% 55%)" }}>AI Assistant</span>
+              <Sparkles className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: "hsl(160 60% 50%)" }} />
+            </button>
           )}
         </motion.div>
 
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.8 }}
-          className="mt-16 text-center"
-        >
-          <p className="text-sm text-white/30">
-            A world shattered by magic. Four factions vie for control.
-          </p>
-          <p className="text-sm text-white/30 mt-1">
-            Lead your forces to victory in endless tactical battles.
-          </p>
-        </motion.div>
-
+        {/* Footer lore */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 1 }}
+          className="mt-12 text-center"
+        >
+          <p className="text-xs font-body text-[hsl(45_20%_50%)] tracking-wide">
+            Four factions. Endless grudges. Only the worthy survive.
+          </p>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1.2 }}
           className="absolute bottom-4 left-1/2 -translate-x-1/2"
         >
-          <p className="text-xs text-white/20">
-            Procedurally Generated Battles | Rich Lore | Strategic Depth
+          <p className="text-[10px] text-white/20 font-body tracking-widest">
+            GRUDGE STUDIO · ALPHA BUILD
           </p>
         </motion.div>
       </div>
