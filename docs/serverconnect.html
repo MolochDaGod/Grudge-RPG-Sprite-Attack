@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grudge Fighter — Server Deployment Guide</title>
+    <link rel="icon" type="image/png" href="./logo.png">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;700&display=swap');
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Inter',system-ui,sans-serif;background:#09090b;color:#e4e4e7;line-height:1.7}
+        a{color:#ef4444;text-decoration:none}
+        a:hover{text-decoration:underline}
+
+        nav{display:flex;align-items:center;gap:16px;padding:14px 24px;border-bottom:1px solid #1c1c1e;position:sticky;top:0;background:#09090b;z-index:10}
+        nav a.brand{color:#ef4444;font-weight:700;font-size:1.1rem;text-decoration:none}
+        nav .sep{color:#333}
+
+        .page{max-width:900px;margin:0 auto;padding:40px 24px 120px}
+        h1{font-size:2.2rem;font-weight:700;color:#fff;margin-bottom:8px}
+        h1 span{color:#ef4444}
+        .subtitle{color:#71717a;font-size:1rem;margin-bottom:48px}
+        h2{font-size:1.4rem;font-weight:700;color:#fff;margin:48px 0 16px;padding-bottom:8px;border-bottom:1px solid #1c1c1e}
+        h3{font-size:1rem;font-weight:700;color:#a1a1aa;margin:24px 0 8px;text-transform:uppercase;letter-spacing:0.05em;font-size:0.85rem}
+        p{color:#a1a1aa;margin-bottom:16px}
+        ul{color:#a1a1aa;margin:0 0 16px 20px}
+        li{margin-bottom:6px}
+        strong{color:#e4e4e7}
+
+        .arch{background:#111113;border:1px solid #1c1c1e;border-radius:8px;padding:24px;margin:24px 0;font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:#71717a;white-space:pre;overflow-x:auto;line-height:1.5}
+        .arch b{color:#ef4444}
+        .arch em{color:#22d3ee;font-style:normal}
+
+        pre{background:#111113;border:1px solid #1c1c1e;border-radius:8px;padding:16px 20px;margin:12px 0 20px;overflow-x:auto;position:relative}
+        code{font-family:'JetBrains Mono',monospace;font-size:0.82rem;color:#d4d4d8;line-height:1.6}
+        .copy-btn{position:absolute;top:8px;right:8px;background:#27272a;border:1px solid #3f3f46;color:#a1a1aa;padding:4px 10px;border-radius:4px;font-size:0.7rem;cursor:pointer;font-family:'JetBrains Mono',monospace}
+        .copy-btn:hover{background:#3f3f46;color:#fff}
+
+        .card{background:#111113;border:1px solid #1c1c1e;border-radius:8px;padding:20px 24px;margin:16px 0}
+        .card h4{color:#ef4444;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px}
+
+        .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:16px 0}
+        .grid .card{margin:0}
+
+        .tag{display:inline-block;padding:2px 8px;border-radius:3px;font-size:0.7rem;font-weight:700;margin-right:4px}
+        .tag-green{background:#052e16;color:#4ade80;border:1px solid #166534}
+        .tag-blue{background:#0c1e3a;color:#60a5fa;border:1px solid #1e40af}
+        .tag-red{background:#2a0a0a;color:#f87171;border:1px solid #7f1d1d}
+        .tag-yellow{background:#2a1f00;color:#fbbf24;border:1px solid #92400e}
+
+        table{width:100%;border-collapse:collapse;margin:16px 0}
+        th{text-align:left;padding:8px 12px;color:#ef4444;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid #1c1c1e}
+        td{padding:8px 12px;color:#a1a1aa;font-size:0.85rem;border-bottom:1px solid #111113}
+        td code{background:#1c1c1e;padding:2px 6px;border-radius:3px;font-size:0.8rem}
+
+        .step{counter-increment:step;position:relative;padding-left:48px;margin-bottom:32px}
+        .step::before{content:counter(step);position:absolute;left:0;top:0;width:32px;height:32px;background:#1c1c1e;border:1px solid #ef4444;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#ef4444;font-weight:700;font-size:0.85rem}
+        .steps{counter-reset:step}
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="./" class="brand">Grudge Fighter</a>
+        <span class="sep">›</span>
+        <span style="color:#71717a">Server Deployment</span>
+    </nav>
+
+    <div class="page">
+        <h1>Server <span>Connect</span></h1>
+        <p class="subtitle">Everything you need to deploy PvP game servers for Grudge Fighter.</p>
+
+        <!-- Architecture -->
+        <h2>Architecture</h2>
+        <div class="arch">
+┌──────────────────┐       WebSocket        ┌──────────────────┐
+│                  │    <em>socket.io /pvp</em>     │                  │
+│  <b>Vercel Frontend</b>  │ ◄──────────────────► │  <b>PvP Game Server</b>  │
+│  (static build)  │                       │  (Node.js)       │
+│                  │                       │                  │
+└──────────────────┘                       └──────────────────┘
+        │                                          │
+        │  HTTPS                                   │  Port 5000
+        ▼                                          ▼
+  <em>grudge-rpg-sprite-attack</em>              <em>grudge-pvp-server</em>
+  <em>-grudgenexus.vercel.app</em>              <em>-production.up.railway.app</em>
+        </div>
+
+        <p>The game client (Vercel) connects to the PvP server via WebSocket on the <code>/pvp</code> path. The server handles room creation, matchmaking, and real-time input relay between players.</p>
+
+        <!-- Current Live Servers -->
+        <h2>Current Live Servers</h2>
+        <div class="grid">
+            <div class="card">
+                <h4>Frontend</h4>
+                <p><span class="tag tag-green">LIVE</span> Vercel auto-deploy</p>
+                <code>grudge-rpg-sprite-attack-grudgenexus.vercel.app</code>
+            </div>
+            <div class="card">
+                <h4>PvP Server</h4>
+                <p><span class="tag tag-green">LIVE</span> Railway</p>
+                <code>grudge-pvp-server-production.up.railway.app</code>
+            </div>
+            <div class="card">
+                <h4>Landing Page</h4>
+                <p><span class="tag tag-green">LIVE</span> GitHub Pages</p>
+                <code>molochdagod.github.io/Grudge-RPG-Sprite-Attack</code>
+            </div>
+            <div class="card">
+                <h4>PvP Server Repo</h4>
+                <p><span class="tag tag-blue">SOURCE</span> GitHub</p>
+                <code>MolochDaGod/grudge-pvp-server</code>
+            </div>
+        </div>
+
+        <!-- Deploy Options -->
+        <h2>Deploy a New PvP Server</h2>
+
+        <h3>Option 1: Railway (Fastest)</h3>
+        <div class="steps">
+            <div class="step">
+                <p><strong>Fork the server repo</strong></p>
+                <p>Go to <a href="https://github.com/MolochDaGod/grudge-pvp-server">github.com/MolochDaGod/grudge-pvp-server</a> and fork it.</p>
+            </div>
+            <div class="step">
+                <p><strong>Create Railway project</strong></p>
+                <pre><code>npm install -g @railway/cli
+railway login
+railway init --name my-grudge-pvp
+railway link</code></pre>
+            </div>
+            <div class="step">
+                <p><strong>Deploy</strong></p>
+                <pre><code>railway up --detach</code></pre>
+            </div>
+            <div class="step">
+                <p><strong>Get your URL</strong></p>
+                <pre><code>railway domain</code></pre>
+                <p>You'll get something like <code>my-grudge-pvp-production.up.railway.app</code></p>
+            </div>
+            <div class="step">
+                <p><strong>Point the game client to your server</strong></p>
+                <p>Set the Vercel environment variable:</p>
+                <pre><code>VITE_PVP_SERVER_URL=https://my-grudge-pvp-production.up.railway.app</code></pre>
+            </div>
+        </div>
+
+        <h3>Option 2: Docker (Any VPS)</h3>
+        <div class="steps">
+            <div class="step">
+                <p><strong>Clone and build</strong></p>
+                <pre><code>git clone https://github.com/MolochDaGod/grudge-pvp-server.git
+cd grudge-pvp-server
+docker build -t grudge-pvp .</code></pre>
+            </div>
+            <div class="step">
+                <p><strong>Run the container</strong></p>
+                <pre><code>docker run -d \
+  --name grudge-pvp \
+  --restart unless-stopped \
+  -p 5000:5000 \
+  -e PORT=5000 \
+  grudge-pvp</code></pre>
+            </div>
+            <div class="step">
+                <p><strong>Verify it's running</strong></p>
+                <pre><code>curl http://localhost:5000/health
+# {"status":"ok","rooms":0,"uptime":...}</code></pre>
+            </div>
+        </div>
+
+        <h3>Option 3: Cloudflare + VM (Production)</h3>
+        <div class="steps">
+            <div class="step">
+                <p><strong>Deploy Docker on a VM</strong> (Hetzner, DigitalOcean, AWS, etc.)</p>
+                <p>Same Docker commands as Option 2.</p>
+            </div>
+            <div class="step">
+                <p><strong>Add Cloudflare DNS record</strong></p>
+                <p>In your Cloudflare dashboard for <code>grudge-studio.com</code>:</p>
+                <pre><code>Type: A
+Name: fighter-api
+Value: [YOUR_VM_IP]
+Proxy: ON (orange cloud)</code></pre>
+            </div>
+            <div class="step">
+                <p><strong>Update the game client</strong></p>
+                <pre><code>VITE_PVP_SERVER_URL=https://fighter-api.grudge-studio.com</code></pre>
+                <p>Cloudflare handles SSL and proxies WebSocket natively — no extra config needed.</p>
+            </div>
+        </div>
+
+        <h3>Option 4: Node.js Direct (No Docker)</h3>
+        <pre><code>git clone https://github.com/MolochDaGod/grudge-pvp-server.git
+cd grudge-pvp-server
+npm install
+PORT=5000 node index.js</code></pre>
+
+        <!-- Server API Reference -->
+        <h2>Server API</h2>
+
+        <h3>HTTP Endpoints</h3>
+        <table>
+            <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+            <tr><td><code>GET</code></td><td><code>/</code></td><td>Server info page (HTML)</td></tr>
+            <tr><td><code>GET</code></td><td><code>/health</code></td><td>JSON health check: status, room count, uptime</td></tr>
+        </table>
+
+        <h3>Socket.io Events</h3>
+        <p>Connect to <code>wss://YOUR_SERVER/pvp</code> with socket.io client:</p>
+        <table>
+            <tr><th>Event</th><th>Direction</th><th>Payload</th></tr>
+            <tr><td><code>room:create</code></td><td>Client → Server</td><td>Callback returns <code>{ roomId, slot }</code></td></tr>
+            <tr><td><code>room:join</code></td><td>Client → Server</td><td><code>roomId</code> → callback <code>{ success, slot }</code></td></tr>
+            <tr><td><code>room:pick</code></td><td>Client → Server</td><td><code>{ roomId, characterId }</code></td></tr>
+            <tr><td><code>room:ready</code></td><td>Client → Server</td><td><code>{ roomId }</code></td></tr>
+            <tr><td><code>room:opponent-joined</code></td><td>Server → Client</td><td><em>none</em></td></tr>
+            <tr><td><code>room:opponent-picked</code></td><td>Server → Client</td><td><code>{ characterId }</code></td></tr>
+            <tr><td><code>fight:start</code></td><td>Server → Both</td><td><code>{ p1Character, p2Character }</code></td></tr>
+            <tr><td><code>input</code></td><td>Client → Server</td><td><code>{ roomId, frame, keys[] }</code></td></tr>
+            <tr><td><code>input:remote</code></td><td>Server → Client</td><td><code>{ frame, keys[] }</code></td></tr>
+            <tr><td><code>action</code></td><td>Client → Server</td><td><code>{ roomId, action, params }</code></td></tr>
+            <tr><td><code>action:remote</code></td><td>Server → Client</td><td><code>{ action, params }</code></td></tr>
+            <tr><td><code>room:opponent-left</code></td><td>Server → Client</td><td><em>none</em></td></tr>
+        </table>
+
+        <h3>Action Types</h3>
+        <table>
+            <tr><th>Action</th><th>Description</th></tr>
+            <tr><td><code>attack</code></td><td>Normal melee (Q/E)</td></tr>
+            <tr><td><code>dash</code></td><td>LMB dash attack</td></tr>
+            <tr><td><code>block</code></td><td>RMB parry/block</td></tr>
+            <tr><td><code>jump</code></td><td>Jump (W)</td></tr>
+            <tr><td><code>ranged</code></td><td>Ranged projectile (F)</td></tr>
+            <tr><td><code>super</code></td><td>Super attack (R)</td></tr>
+            <tr><td><code>up-special</code></td><td>Up special (W+Q/E)</td></tr>
+            <tr><td><code>down-special</code></td><td>Down special (S+Q/E)</td></tr>
+        </table>
+
+        <!-- Environment Variables -->
+        <h2>Environment Variables</h2>
+        <table>
+            <tr><th>Variable</th><th>Where</th><th>Default</th><th>Description</th></tr>
+            <tr><td><code>PORT</code></td><td>Server</td><td><code>5000</code></td><td>Server listen port</td></tr>
+            <tr><td><code>VITE_PVP_SERVER_URL</code></td><td>Frontend</td><td>Railway URL</td><td>PvP server WebSocket URL</td></tr>
+            <tr><td><code>REDIS_URL</code></td><td>Server</td><td><em>none</em></td><td>Redis for multi-instance scaling</td></tr>
+        </table>
+
+        <!-- Scaling -->
+        <h2>Scaling Beyond 1 Server</h2>
+        <p>A single server handles ~500 concurrent rooms. For more:</p>
+
+        <div class="card">
+            <h4>Add Redis Adapter</h4>
+            <pre><code>npm install @socket.io/redis-adapter redis</code></pre>
+            <p>Then in <code>index.js</code>:</p>
+            <pre><code>import { createAdapter } from "@socket.io/redis-adapter";
+import { createClient } from "redis";
+
+const pub = createClient({ url: process.env.REDIS_URL });
+const sub = pub.duplicate();
+await Promise.all([pub.connect(), sub.connect()]);
+io.adapter(createAdapter(pub, sub));</code></pre>
+        </div>
+
+        <p>Then run multiple server instances behind a load balancer (nginx, Cloudflare, or Railway scaling).</p>
+
+        <!-- Monitoring -->
+        <h2>Monitoring</h2>
+        <pre><code># Health check
+curl https://YOUR_SERVER/health
+
+# Watch logs (Railway)
+railway logs
+
+# Watch logs (Docker)
+docker logs -f grudge-pvp</code></pre>
+
+        <p>All PvP events are logged with the <code>[pvp]</code> tag:</p>
+        <pre><code>[pvp] connected: abc123
+[pvp] room XKCD created
+[pvp] def456 joined XKCD
+[pvp] room XKCD starting: knight vs wizard
+[pvp] disconnected: abc123
+[pvp] room XKCD deleted</code></pre>
+
+        <!-- Client Connection -->
+        <h2>Connecting the Game Client</h2>
+        <p>The game client uses the <code>usePvP</code> hook (<code>client/src/hooks/usePvP.ts</code>) which connects via socket.io:</p>
+        <pre><code>import { io } from "socket.io-client";
+
+const socket = io("https://YOUR_SERVER", {
+  path: "/pvp",
+  transports: ["websocket", "polling"],
+});</code></pre>
+
+        <p>To point the deployed game at your server, set the Vercel env var:</p>
+        <pre><code># Vercel dashboard → Settings → Environment Variables
+VITE_PVP_SERVER_URL = https://your-server.example.com</code></pre>
+        <p>Then redeploy. The client reads this at build time.</p>
+
+        <!-- Troubleshooting -->
+        <h2>Troubleshooting</h2>
+        <div class="grid">
+            <div class="card">
+                <h4>Connection Failed</h4>
+                <p>Check the server is running: <code>curl /health</code>. Verify CORS allows your domain. Check WebSocket support on your proxy.</p>
+            </div>
+            <div class="card">
+                <h4>Both Players Control P1</h4>
+                <p>Fixed in latest build. Each client controls their assigned slot (p1/p2). Remote inputs use separate key refs.</p>
+            </div>
+            <div class="card">
+                <h4>Room Not Found</h4>
+                <p>Rooms auto-delete after 10 minutes if not started. Codes are 4 uppercase characters.</p>
+            </div>
+            <div class="card">
+                <h4>Lag / Desync</h4>
+                <p>Input relay architecture means both clients run the same simulation. High latency causes visible delay but not desync. Use a server geographically close to players.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // Add copy buttons to all code blocks
+    document.querySelectorAll('pre').forEach(pre => {
+        const btn = document.createElement('button');
+        btn.className = 'copy-btn';
+        btn.textContent = 'Copy';
+        btn.onclick = () => {
+            navigator.clipboard.writeText(pre.querySelector('code').textContent);
+            btn.textContent = 'Copied!';
+            setTimeout(() => btn.textContent = 'Copy', 1500);
+        };
+        pre.appendChild(btn);
+    });
+    </script>
+</body>
+</html>
