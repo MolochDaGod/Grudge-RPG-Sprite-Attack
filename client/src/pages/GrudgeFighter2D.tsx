@@ -118,12 +118,35 @@ const P2_CONTROLS = {
 
 // ─── Character Roster (GrudgeRPG 100x100 sprites) ───────────────────────
 
+interface EffectSpriteDef {
+    src: string;
+    frames: number;
+    hold: number;
+}
+
 interface CharacterDef {
     id: string;
     name: string;
     sprites: FighterSpriteSet;
     moveSet: CharacterMoveSet;
     color: string;
+    attackEffect: EffectSpriteDef;
+    projectileSrc?: string; // single-frame projectile image
+    projectileFrames?: number; // animated projectile strip
+}
+
+// Active visual effects rendered on the canvas
+interface ActiveEffect {
+    id: string;
+    x: number;
+    y: number;
+    image: HTMLImageElement;
+    frames: number;
+    hold: number;
+    frameIndex: number;
+    frameTick: number;
+    scale: number;
+    flip: boolean;
 }
 
 function charSprites(folder: string, config: {
@@ -158,6 +181,7 @@ const CHARACTER_ROSTER: CharacterDef[] = [
             runSpeed: 5.6, jumpForce: 16, baseDamage: 13, projectileDamage: 10,
             upSpecialDamage: 14, counterDamage: 20,
         },
+        attackEffect: { src: "/fighter2d/effects/Knight-Attack03_Effect.png", frames: 11, hold: 3 },
     },
     {
         id: "archer",
@@ -174,6 +198,9 @@ const CHARACTER_ROSTER: CharacterDef[] = [
             runSpeed: 6.8, jumpForce: 17.5, baseDamage: 9, projectileDamage: 15,
             upSpecialDamage: 11, counterDamage: 16,
         },
+        attackEffect: { src: "/fighter2d/effects/Archer-Attack02_Effect.png", frames: 12, hold: 3 },
+        projectileSrc: "/fighter2d/projectiles/Arrow.png",
+        projectileFrames: 1,
     },
     {
         id: "wizard",
@@ -190,6 +217,9 @@ const CHARACTER_ROSTER: CharacterDef[] = [
             runSpeed: 5.4, jumpForce: 16.5, baseDamage: 10, projectileDamage: 16,
             upSpecialDamage: 12, counterDamage: 22,
         },
+        attackEffect: { src: "/fighter2d/effects/Wizard-Attack01_Effect.png", frames: 10, hold: 3 },
+        projectileSrc: "/fighter2d/projectiles/Wizard-Projectile.png",
+        projectileFrames: 10,
     },
     {
         id: "orc",
@@ -206,6 +236,7 @@ const CHARACTER_ROSTER: CharacterDef[] = [
             runSpeed: 5.0, jumpForce: 15, baseDamage: 15, projectileDamage: 12,
             upSpecialDamage: 16, counterDamage: 18,
         },
+        attackEffect: { src: "/fighter2d/effects/Orc-attack01_Effect.png", frames: 6, hold: 4 },
     },
     {
         id: "skeleton",
@@ -223,6 +254,7 @@ const CHARACTER_ROSTER: CharacterDef[] = [
             runSpeed: 5.8, jumpForce: 16, baseDamage: 11, projectileDamage: 13,
             upSpecialDamage: 13, counterDamage: 19,
         },
+        attackEffect: { src: "/fighter2d/effects/Armored Skeleton-Attack02_Effect.png", frames: 9, hold: 3 },
     },
     {
         id: "swordsman",
@@ -240,6 +272,7 @@ const CHARACTER_ROSTER: CharacterDef[] = [
             runSpeed: 6.4, jumpForce: 17, baseDamage: 12, projectileDamage: 11,
             upSpecialDamage: 13, counterDamage: 17,
         },
+        attackEffect: { src: "/fighter2d/effects/Swordsman-Attack01_Effect.png", frames: 7, hold: 3 },
     },
     {
         id: "priest",
@@ -256,6 +289,7 @@ const CHARACTER_ROSTER: CharacterDef[] = [
             runSpeed: 5.2, jumpForce: 16, baseDamage: 9, projectileDamage: 14,
             upSpecialDamage: 10, counterDamage: 24,
         },
+        attackEffect: { src: "/fighter2d/effects/Priest-Attack_effect.png", frames: 5, hold: 4 },
     },
 ];
 
@@ -431,7 +465,15 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         p2: Record<AnimationState, RuntimeSprite>;
         background: HTMLImageElement;
         castle: HTMLImageElement;
+        p1Effect: HTMLImageElement | null;
+        p2Effect: HTMLImageElement | null;
+        p1Projectile: HTMLImageElement | null;
+        p2Projectile: HTMLImageElement | null;
     } | null>(null);
+
+    const activeEffectsRef = useRef<ActiveEffect[]>([]);
+    const screenShakeRef = useRef({ intensity: 0, until: 0 });
+    const hitFlashRef = useRef<{ target: FighterId; until: number } | null>(null);
 
     const handleCharacterPick = useCallback((char: CharacterDef) => {
         if (selectPhase === "p1") {
@@ -597,15 +639,28 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             startedAt: performance.now(),
         };
 
+        const maybeLoad = (src?: string) => src ? loadImage(src).catch(() => null) : Promise.resolve(null);
+
         Promise.all([
             loadSpriteSet(p1Pick.sprites),
             loadSpriteSet(p2Pick.sprites),
             loadImage("/fighter2d/image/Hills.png"),
             loadImage("/fighter2d/image/castle.png"),
+            maybeLoad(p1Pick.attackEffect.src),
+            maybeLoad(p2Pick.attackEffect.src),
+            maybeLoad(p1Pick.projectileSrc),
+            maybeLoad(p2Pick.projectileSrc),
         ])
-            .then(([p1, p2, background, castle]) => {
+            .then(([p1, p2, background, castle, p1Effect, p2Effect, p1Proj, p2Proj]) => {
                 if (disposed) return;
-                assetsRef.current = { p1, p2, background, castle };
+                assetsRef.current = {
+                    p1, p2, background, castle,
+                    p1Effect: p1Effect as HTMLImageElement | null,
+                    p2Effect: p2Effect as HTMLImageElement | null,
+                    p1Projectile: p1Proj as HTMLImageElement | null,
+                    p2Projectile: p2Proj as HTMLImageElement | null,
+                };
+                activeEffectsRef.current = [];
                 setIsReady(true);
             })
             .catch((err: unknown) => {
@@ -668,6 +723,24 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
         let previousTime = performance.now();
 
+        // ─── Helper: spawn a visual effect at a position ───────────
+        const spawnEffect = (image: HTMLImageElement | null, frames: number, hold: number, x: number, y: number, flip: boolean) => {
+            if (!image) return;
+            activeEffectsRef.current.push({
+                id: `fx-${performance.now()}-${Math.random()}`,
+                x, y, image, frames, hold,
+                frameIndex: 0, frameTick: 0, scale: 3, flip,
+            });
+        };
+
+        const triggerScreenShake = (intensity: number, duration: number) => {
+            screenShakeRef.current = { intensity, until: performance.now() + duration };
+        };
+
+        const triggerHitFlash = (target: FighterId, duration: number) => {
+            hitFlashRef.current = { target, until: performance.now() + duration };
+        };
+
         const drawFighter = (
             fighter: FighterRuntime,
             sprites: Record<AnimationState, RuntimeSprite>
@@ -679,6 +752,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             const drawX = fighter.x - drawWidth / 2;
             const drawY = fighter.y - drawHeight;
 
+            // Hit flash — tint the fighter white briefly
+            const now = performance.now();
+            const flash = hitFlashRef.current;
+            const isFlashing = flash && flash.target === fighter.id && now < flash.until;
+
             ctx.save();
             if (fighter.facing < 0) {
                 ctx.translate(drawX + drawWidth / 2, 0);
@@ -686,24 +764,30 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 ctx.translate(-(drawX + drawWidth / 2), 0);
             }
 
+            // Hurt flash: alternate visibility
+            if (isFlashing && Math.floor(now / 40) % 2 === 0) {
+                ctx.globalAlpha = 0.3;
+            }
+
             ctx.drawImage(
                 currentSprite.image,
-                sourceX,
-                0,
-                currentSprite.frameWidth,
-                currentSprite.frameHeight,
-                drawX,
-                drawY,
-                drawWidth,
-                drawHeight
+                sourceX, 0,
+                currentSprite.frameWidth, currentSprite.frameHeight,
+                drawX, drawY,
+                drawWidth, drawHeight
             );
 
+            ctx.globalAlpha = 1;
             ctx.restore();
 
-            if (fighter.counterUntil > performance.now()) {
+            // Counter shield aura
+            if (fighter.counterUntil > now) {
                 ctx.save();
-                ctx.strokeStyle = "rgba(125, 245, 255, 0.9)";
+                const pulse = 0.6 + 0.4 * Math.sin(now / 60);
+                ctx.strokeStyle = `rgba(125, 245, 255, ${pulse})`;
                 ctx.lineWidth = 3;
+                ctx.shadowColor = "cyan";
+                ctx.shadowBlur = 16;
                 ctx.beginPath();
                 ctx.arc(fighter.x, fighter.y - fighter.height * 0.5, fighter.width * 0.6, 0, Math.PI * 2);
                 ctx.stroke();
@@ -711,23 +795,66 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             }
         };
 
+        // ─── Draw active sprite effects ─────────────────────────────
+        const drawEffects = () => {
+            const alive: ActiveEffect[] = [];
+            for (const fx of activeEffectsRef.current) {
+                const frameW = fx.image.width / fx.frames;
+                const frameH = fx.image.height;
+                const srcX = fx.frameIndex * frameW;
+                const dW = frameW * fx.scale;
+                const dH = frameH * fx.scale;
+
+                ctx.save();
+                if (fx.flip) {
+                    ctx.translate(fx.x, 0);
+                    ctx.scale(-1, 1);
+                    ctx.translate(-fx.x, 0);
+                }
+                ctx.drawImage(fx.image, srcX, 0, frameW, frameH, fx.x - dW / 2, fx.y - dH / 2, dW, dH);
+                ctx.restore();
+
+                // Advance frame
+                fx.frameTick++;
+                if (fx.frameTick >= fx.hold) {
+                    fx.frameTick = 0;
+                    fx.frameIndex++;
+                }
+                if (fx.frameIndex < fx.frames) alive.push(fx);
+            }
+            activeEffectsRef.current = alive;
+        };
+
         const draw = (world: WorldState) => {
             const assets = assetsRef.current;
             if (!assets) return;
+            const now = performance.now();
 
-            ctx.clearRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
+            // Screen shake offset
+            let shakeX = 0, shakeY = 0;
+            if (now < screenShakeRef.current.until) {
+                const t = screenShakeRef.current.intensity;
+                shakeX = (Math.random() - 0.5) * t * 2;
+                shakeY = (Math.random() - 0.5) * t * 2;
+            }
 
+            ctx.save();
+            ctx.translate(shakeX, shakeY);
+
+            ctx.clearRect(-10, -10, ARENA_WIDTH + 20, ARENA_HEIGHT + 20);
+
+            // Background
             ctx.drawImage(assets.background, 0, 0, ARENA_WIDTH, ARENA_HEIGHT);
             ctx.globalAlpha = 0.85;
             ctx.drawImage(assets.castle, ARENA_WIDTH - 220, FLOOR_Y - 90, 200, 120);
             ctx.globalAlpha = 1;
 
+            // Floor
             const floorGradient = ctx.createLinearGradient(0, FLOOR_Y, 0, ARENA_HEIGHT);
             floorGradient.addColorStop(0, "rgba(18, 22, 40, 0.4)");
             floorGradient.addColorStop(1, "rgba(8, 10, 20, 0.95)");
             ctx.fillStyle = floorGradient;
             ctx.fillRect(0, FLOOR_Y, ARENA_WIDTH, ARENA_HEIGHT - FLOOR_Y);
-
             ctx.strokeStyle = "rgba(255, 224, 140, 0.35)";
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -735,18 +862,66 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             ctx.lineTo(ARENA_WIDTH, FLOOR_Y + 1);
             ctx.stroke();
 
+            // Fighters
             drawFighter(world.p1, assets.p1);
             drawFighter(world.p2, assets.p2);
 
+            // Projectiles — use sprite images if available
             for (const projectile of world.projectiles) {
-                const projectileGradient = ctx.createRadialGradient(projectile.x, projectile.y, 2, projectile.x, projectile.y, projectile.radius);
-                projectileGradient.addColorStop(0, projectile.owner === "p1" ? "#ffd56a" : "#8de7ff");
-                projectileGradient.addColorStop(1, "rgba(255,255,255,0.1)");
-                ctx.fillStyle = projectileGradient;
-                ctx.beginPath();
-                ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2);
-                ctx.fill();
+                const projImg = projectile.owner === "p1" ? assets.p1Projectile : assets.p2Projectile;
+                const projPick = projectile.owner === "p1" ? p1Pick : p2Pick;
+                const projFrames = projPick?.projectileFrames || 1;
+
+                if (projImg && projImg.complete) {
+                    const frameW = projImg.width / projFrames;
+                    const frameH = projImg.height;
+                    // Animate projectile frames based on time
+                    const frameIdx = projFrames > 1 ? Math.floor((now / 60) % projFrames) : 0;
+                    const size = 60;
+                    ctx.save();
+                    if (projectile.vx < 0) {
+                        ctx.translate(projectile.x, 0);
+                        ctx.scale(-1, 1);
+                        ctx.translate(-projectile.x, 0);
+                    }
+                    ctx.drawImage(projImg, frameIdx * frameW, 0, frameW, frameH, projectile.x - size / 2, projectile.y - size / 2, size, size);
+                    ctx.restore();
+
+                    // Glow trail behind projectile
+                    ctx.save();
+                    ctx.globalAlpha = 0.35;
+                    const trailGrad = ctx.createRadialGradient(projectile.x, projectile.y, 2, projectile.x, projectile.y, 28);
+                    trailGrad.addColorStop(0, projectile.owner === "p1" ? "#ffd56a" : "#8de7ff");
+                    trailGrad.addColorStop(1, "transparent");
+                    ctx.fillStyle = trailGrad;
+                    ctx.fillRect(projectile.x - 30, projectile.y - 30, 60, 60);
+                    ctx.restore();
+                } else {
+                    // Fallback: gradient orb
+                    const grad = ctx.createRadialGradient(projectile.x, projectile.y, 2, projectile.x, projectile.y, projectile.radius);
+                    grad.addColorStop(0, projectile.owner === "p1" ? "#ffd56a" : "#8de7ff");
+                    grad.addColorStop(1, "rgba(255,255,255,0.1)");
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
             }
+
+            // Sprite-based attack/hit effects
+            drawEffects();
+
+            // Hit flash full-screen tint
+            const flash = hitFlashRef.current;
+            if (flash && now < flash.until) {
+                ctx.save();
+                ctx.globalAlpha = 0.12;
+                ctx.fillStyle = "#ffffff";
+                ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
+                ctx.restore();
+            }
+
+            ctx.restore(); // end screen shake
         };
 
         const tickFighterAnimation = (
@@ -852,6 +1027,19 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             }
 
             const result = applyDamage(defender, attacker, attacker.moveSet.baseDamage, now);
+
+            // Spawn attack effect sprite at the hit point
+            const effectImg = attacker.id === "p1" ? assets.p1Effect : assets.p2Effect;
+            const effectDef = attacker.id === "p1" ? p1Pick?.attackEffect : p2Pick?.attackEffect;
+            if (effectImg && effectDef) {
+                spawnEffect(effectImg, effectDef.frames, effectDef.hold,
+                    defender.x, defender.y - defender.height * 0.5, attacker.facing < 0);
+            }
+
+            // Screen shake and hit flash on damage
+            triggerScreenShake(result.wasCounter ? 12 : 6, result.wasCounter ? 200 : 120);
+            triggerHitFlash(defender.id as FighterId, 100);
+
             return {
                 attacker: { ...result.attacker, attackHasConnected: true },
                 defender: result.target,
@@ -896,6 +1084,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 );
 
                 if (hit) {
+                    const hitTarget = updated.owner === "p1" ? nextP2 : nextP1;
                     if (updated.owner === "p1") {
                         const result = applyDamage(nextP2, nextP1, updated.damage, now);
                         nextP2 = result.target;
@@ -905,6 +1094,17 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                         nextP1 = result.target;
                         nextP2 = result.attacker;
                     }
+
+                    // Projectile hit effects
+                    const ownerEffect = updated.owner === "p1" ? assets.p1Effect : assets.p2Effect;
+                    const ownerDef = updated.owner === "p1" ? p1Pick?.attackEffect : p2Pick?.attackEffect;
+                    if (ownerEffect && ownerDef) {
+                        spawnEffect(ownerEffect, ownerDef.frames, ownerDef.hold,
+                            hitTarget.x, hitTarget.y - hitTarget.height * 0.5, updated.vx < 0);
+                    }
+                    triggerScreenShake(8, 150);
+                    triggerHitFlash(hitTarget.id as FighterId, 80);
+
                     continue;
                 }
 
