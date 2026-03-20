@@ -270,8 +270,9 @@ interface CharacterDef {
     moveSet: CharacterMoveSet;
     color: string;
     attackEffect: EffectSpriteDef;
-    projectileSrc?: string; // single-frame projectile image
-    projectileFrames?: number; // animated projectile strip
+    projectileSrc?: string;
+    projectileFrames?: number;
+    renderScale: number; // extra scale multiplier (Zerie 100px = 2, others = 1)
 }
 
 // Active visual effects rendered on the canvas
@@ -330,6 +331,7 @@ function grudaToCharDef(g: GrudaCharDef): CharacterDef {
             : { src: "/fighter2d/effects/slash_arc.png", frames: 6, hold: 3 },
         projectileSrc: g.projectile ? `/fighter2d/projectiles/${g.projectile}` : undefined,
         projectileFrames: g.projectile ? 1 : undefined,
+        renderScale: g.renderScale ?? 1,
     };
 }
 
@@ -1158,8 +1160,10 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         ) => {
             const currentSprite = sprites[fighter.state];
             const sourceX = fighter.frameIndex * currentSprite.frameWidth;
-            // Scale all characters to ~300px tall regardless of original frame size
-            const targetHeight = 300;
+            // Scale to ~300px base, then apply per-character renderScale (Zerie = 2x)
+            const charDef = fighter.id === "p1" ? p1Pick : p2Pick;
+            const renderMul = charDef?.renderScale ?? 1;
+            const targetHeight = 300 * renderMul;
             const scale = targetHeight / currentSprite.frameHeight;
             const drawWidth = currentSprite.frameWidth * scale;
             const drawHeight = currentSprite.frameHeight * scale;
