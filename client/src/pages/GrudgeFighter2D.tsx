@@ -85,6 +85,8 @@ interface Projectile {
     x: number;
     y: number;
     vx: number;
+    vy: number;
+    hasGravity: boolean;
     radius: number;
     damage: number;
     expiresAt: number;
@@ -107,10 +109,15 @@ const ARENA_WIDTH = 1920;
 const ARENA_HEIGHT = 1080;
 const VIEWPORT_W = 1280;
 const VIEWPORT_H = 720;
-const GRAVITY = 0.75 * 0.7; // 30% slower
+const GRAVITY = 0.75 * 0.63; // 37% slower total (30% + 10%)
+const FALL_GRAVITY_SCALE = 0.80; // characters fall 20% slower than raw gravity
 const FRICTION = 0.82;
-const SPEED_SCALE = 0.7; // 30% slower global
+const SPEED_SCALE = 0.63; // 37% slower global (30% + 10%)
+const PROJECTILE_GRAVITY = GRAVITY * 0.6; // gravity for arcing projectiles
 const MAX_AIR_JUMPS = 2;
+const PARRY_WINDOW_MS = 180; // tight timing window for perfect parry
+const PARRY_RECOIL_KB = 8; // knockback on successful parry
+const PARRY_RECOIL_DAMAGE = 10; // damage reflected on parry
 const STARTING_STOCKS = 5;
 const RESPAWN_INVULN_MS = 2000;
 
@@ -149,7 +156,7 @@ const STAGES: StageDefinition[] = [
             { x: 660, y: 300, w: 200, oneWay: true },
         ],
         blastZone: { top: -200, bottom: 1280, left: -300, right: 2220 },
-        bgColor1: '#0c1a0c', bgColor2: '#1a2e1a', floorColor: '#2d5a1e', platformColor: '#3a6b2a',
+        bgColor1: '#0c1a0c', bgColor2: '#1a2e1a', floorColor: '#4a7a30', platformColor: '#5a8a3a',
         bgFeatures: 'castle',
     },
     {
@@ -161,7 +168,7 @@ const STAGES: StageDefinition[] = [
             { x: 1200, y: 560, w: 180, oneWay: true },
         ],
         blastZone: { top: -200, bottom: 1280, left: -300, right: 2220 },
-        bgColor1: '#0a1628', bgColor2: '#1a2a4a', floorColor: '#5a3a1e', platformColor: '#6b4a2e',
+        bgColor1: '#0a1628', bgColor2: '#1a2a4a', floorColor: '#7a5a30', platformColor: '#8a6a40',
         bgFeatures: 'ocean',
     },
     {
@@ -169,7 +176,7 @@ const STAGES: StageDefinition[] = [
         mainFloorY: 700, mainFloorX: 460, mainFloorW: 1000,
         platforms: [],
         blastZone: { top: -200, bottom: 1280, left: -300, right: 2220 },
-        bgColor1: '#0a0a14', bgColor2: '#1a1020', floorColor: '#2a1a2a', platformColor: '#3a2a3a',
+        bgColor1: '#0a0a14', bgColor2: '#1a1020', floorColor: '#5a3a5a', platformColor: '#6a4a6a',
         bgFeatures: 'lava',
     },
     {
@@ -182,7 +189,7 @@ const STAGES: StageDefinition[] = [
             { x: 1280, y: 520, w: 160, oneWay: true },
         ],
         blastZone: { top: -200, bottom: 1280, left: -300, right: 2220 },
-        bgColor1: '#0a1a0a', bgColor2: '#102a10', floorColor: '#1e4a1e', platformColor: '#2a5a2a',
+        bgColor1: '#0a1a0a', bgColor2: '#102a10', floorColor: '#3a6a2a', platformColor: '#4a7a3a',
         bgFeatures: 'forest',
     },
 ];
@@ -389,15 +396,17 @@ function respawnFighter(fighter: FighterRuntime, stage: StageDefinition): Fighte
 }
 
 function isOnPlatform(fighter: FighterRuntime, stage: StageDefinition): number | null {
+    // Wider tolerance prevents fast-falling characters from clipping through
+    const tolerance = Math.max(16, Math.abs(fighter.vy) * 1.5);
     // Check main floor
-    if (fighter.vy >= 0 && fighter.y >= stage.mainFloorY - 2 && fighter.y <= stage.mainFloorY + 10
-        && fighter.x >= stage.mainFloorX && fighter.x <= stage.mainFloorX + stage.mainFloorW) {
+    if (fighter.vy >= 0 && fighter.y >= stage.mainFloorY - 4 && fighter.y <= stage.mainFloorY + tolerance
+        && fighter.x >= stage.mainFloorX - 20 && fighter.x <= stage.mainFloorX + stage.mainFloorW + 20) {
         return stage.mainFloorY;
     }
     // Check platforms (one-way: only land from above)
     for (const p of stage.platforms) {
-        if (fighter.vy >= 0 && fighter.y >= p.y - 2 && fighter.y <= p.y + 10
-            && fighter.x >= p.x && fighter.x <= p.x + p.w) {
+        if (fighter.vy >= 0 && fighter.y >= p.y - 4 && fighter.y <= p.y + tolerance
+            && fighter.x >= p.x - 10 && fighter.x <= p.x + p.w + 10) {
             return p.y;
         }
     }
@@ -706,15 +715,22 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 if (fighterId === "p1") world.p1 = exhausted; else world.p2 = exhausted;
                 return;
             }
+            // Determine if projectile has gravity based on character type
+            // Physical projectiles (arrows, axes, bolts) arc; magic (fireballs, spells) fly straight
+            const charDef = CHARACTER_ROSTER.find(c => c.moveSet.name === actor.moveSet.name);
+            const projSrc = charDef?.projectileSrc ?? '';
+            const isPhysical = /arrow|axe|bolt|bullet/i.test(projSrc);
             const projectile: Projectile = {
                 id: `${fighterId}-${now}`,
                 owner: fighterId,
                 x: actor.x + actor.facing * 40,
-                y: actor.y - actor.height * 0.55,
+                y: actor.y - actor.height * 0.45, // spawn low enough to jump over
                 vx: actor.facing * 10 * SPEED_SCALE,
+                vy: isPhysical ? -1.5 : 0, // physical projectiles arc upward slightly then fall
+                hasGravity: isPhysical,
                 radius: 14,
                 damage: actor.moveSet.projectileDamage,
-                expiresAt: now + 1800,
+                expiresAt: now + 2200,
             };
 
             const next = setState(
@@ -1241,18 +1257,35 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             ctx.scale(cam.zoom, cam.zoom);
             ctx.translate(-cam.x, -cam.y);
 
-            // Draw main floor
+            // Draw main floor — thick solid platform
+            const floorH = 50;
             ctx.fillStyle = stage.floorColor;
-            ctx.fillRect(stage.mainFloorX, stage.mainFloorY, stage.mainFloorW, 30);
-            ctx.fillStyle = 'rgba(255,255,255,0.1)';
-            ctx.fillRect(stage.mainFloorX, stage.mainFloorY, stage.mainFloorW, 3);
+            ctx.fillRect(stage.mainFloorX, stage.mainFloorY, stage.mainFloorW, floorH);
+            // Top edge highlight
+            ctx.fillStyle = 'rgba(255,255,255,0.2)';
+            ctx.fillRect(stage.mainFloorX, stage.mainFloorY, stage.mainFloorW, 4);
+            // Bottom darker edge
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.fillRect(stage.mainFloorX, stage.mainFloorY + floorH - 6, stage.mainFloorW, 6);
+            // Left/right edges
+            ctx.fillStyle = 'rgba(0,0,0,0.2)';
+            ctx.fillRect(stage.mainFloorX, stage.mainFloorY, 4, floorH);
+            ctx.fillRect(stage.mainFloorX + stage.mainFloorW - 4, stage.mainFloorY, 4, floorH);
 
-            // Draw platforms
+            // Draw platforms — thick with visible edges
             for (const p of stage.platforms) {
+                const platH = 24;
                 ctx.fillStyle = stage.platformColor;
-                ctx.fillRect(p.x, p.y, p.w, 12);
-                ctx.fillStyle = 'rgba(255,255,255,0.15)';
-                ctx.fillRect(p.x, p.y, p.w, 2);
+                ctx.fillRect(p.x, p.y, p.w, platH);
+                // Top edge bright highlight
+                ctx.fillStyle = 'rgba(255,255,255,0.25)';
+                ctx.fillRect(p.x, p.y, p.w, 3);
+                // Bottom shadow
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.fillRect(p.x, p.y + platH - 4, p.w, 4);
+                // Rounded corner illusion
+                ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                ctx.fillRect(p.x + 2, p.y + 3, p.w - 4, platH - 7);
             }
 
             // Fighters
@@ -1470,7 +1503,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
             let x = fighter.x + vx;
             let y = fighter.y + fighter.vy;
-            let vy = fighter.vy + GRAVITY;
+            // Characters fall 20% slower than raw gravity
+            let vy = fighter.vy + GRAVITY * FALL_GRAVITY_SCALE;
 
             // Platform collision
             const stage = stageRef.current;
@@ -1621,8 +1655,10 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 const updated = {
                     ...projectile,
                     x: projectile.x + projectile.vx,
+                    y: projectile.y + projectile.vy,
+                    vy: projectile.hasGravity ? projectile.vy + PROJECTILE_GRAVITY : projectile.vy,
                 };
-                if (updated.x < -30 || updated.x > ARENA_WIDTH + 30) continue;
+                if (updated.x < -100 || updated.x > ARENA_WIDTH + 100 || updated.y > 1400) continue;
 
                 const target = updated.owner === "p1" ? nextP2 : nextP1;
                 const targetBox = hurtBox(target);
@@ -1632,6 +1668,26 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 );
 
                 if (hit) {
+                    // Perfect parry check: if target is in counter stance and timing is right
+                    const isParrying = target.counterUntil > now;
+                    if (isParrying) {
+                        // Deflect projectile back! Recoil the shooter.
+                        const shooter = updated.owner === "p1" ? nextP1 : nextP2;
+                        const parryKb = calcKnockback(PARRY_RECOIL_DAMAGE, shooter.hp, shooter.maxHp);
+                        const knockedShooter = setState({
+                            ...shooter,
+                            hp: Math.max(0, shooter.hp - PARRY_RECOIL_DAMAGE),
+                            vx: -updated.vx * 0.5,
+                            vy: parryKb.kbY * 0.5,
+                            stateLockUntil: now + parryKb.hitstun,
+                        }, shooter.hp <= PARRY_RECOIL_DAMAGE ? "death" : "takeHit", now);
+                        if (updated.owner === "p1") nextP1 = knockedShooter;
+                        else nextP2 = knockedShooter;
+                        triggerScreenShake(14, 250);
+                        triggerHitFlash(shooter.id as FighterId, 120);
+                        continue; // projectile destroyed
+                    }
+
                     const hitTarget = updated.owner === "p1" ? nextP2 : nextP1;
                     if (updated.owner === "p1") {
                         const result = applyDamage(nextP2, nextP1, updated.damage, now);
