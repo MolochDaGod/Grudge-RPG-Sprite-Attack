@@ -545,6 +545,33 @@ function formatTime(seconds: number): string {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
+// Renders a single mid-attack frame from the sprite strip onto a canvas
+function AttackFrameCanvas({ src, frames, frameSize, size }: { src: string; frames: number; frameSize: number; size: number }) {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const img = new Image();
+        img.onload = () => {
+            const fw = img.width / frames;
+            const fh = img.height;
+            // Pick a frame ~60% through the attack (the juicy part of the swing)
+            const pickFrame = Math.min(Math.floor(frames * 0.6), frames - 1);
+            ctx.clearRect(0, 0, size, size);
+            ctx.imageSmoothingEnabled = false;
+            // Draw the single frame scaled to fill the canvas
+            const scale = Math.min(size / fw, size / fh);
+            const dw = fw * scale;
+            const dh = fh * scale;
+            ctx.drawImage(img, pickFrame * fw, 0, fw, fh, (size - dw) / 2, (size - dh) / 2, dw, dh);
+        };
+        img.src = src;
+    }, [src, frames, frameSize, size]);
+    return <canvas ref={canvasRef} width={size} height={size} className="w-full h-full" style={{ imageRendering: 'pixelated' }} />;
+}
+
 export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const [p1Pick, setP1Pick] = useState<CharacterDef | null>(null);
     const [p2Pick, setP2Pick] = useState<CharacterDef | null>(null);
@@ -1920,10 +1947,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                                 className="group relative bg-slate-900/80 border border-white/10 rounded-lg p-4 hover:border-amber-400/60 hover:bg-slate-800/80 transition-all text-left"
                             >
                                 <div className="w-full h-32 flex items-center justify-center mb-3 overflow-hidden bg-black/30 rounded">
-                                    <img
+                                    <AttackFrameCanvas
                                         src={char.sprites.attack.src}
-                                        alt={char.name}
-                                        className="h-full w-full object-cover" style={{ imageRendering: "pixelated", objectPosition: "center" }}
+                                        frames={char.sprites.attack.frames}
+                                        frameSize={GRUDA_ROSTER.find(g => g.id === char.id)?.frameSize ?? 100}
+                                        size={128}
                                     />
                                 </div>
                                 <div className="text-center">
