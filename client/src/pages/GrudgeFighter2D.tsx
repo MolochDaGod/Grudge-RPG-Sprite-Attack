@@ -61,6 +61,9 @@ interface FighterRuntime {
     facing: 1 | -1;
     hp: number;
     maxHp: number;
+    stocks: number;
+    airJumpsLeft: number;
+    invulnUntil: number;
     state: AnimationState;
     stateSince: number;
     frameIndex: number;
@@ -100,11 +103,113 @@ interface GrudgeFighter2DProps {
     onBack: () => void;
 }
 
-const ARENA_WIDTH = 1280;
-const ARENA_HEIGHT = 720;
-const FLOOR_Y = 610;
-const GRAVITY = 0.75;
+const ARENA_WIDTH = 1920;
+const ARENA_HEIGHT = 1080;
+const VIEWPORT_W = 1280;
+const VIEWPORT_H = 720;
+const GRAVITY = 0.75 * 0.7; // 30% slower
 const FRICTION = 0.82;
+const SPEED_SCALE = 0.7; // 30% slower global
+const MAX_AIR_JUMPS = 2;
+const STARTING_STOCKS = 5;
+const RESPAWN_INVULN_MS = 2000;
+
+// ─── Stage system ────────────────────────────────────────────────
+interface Platform {
+    x: number; y: number; w: number;
+    oneWay: boolean; // can jump through from below
+}
+
+interface BlastZone {
+    top: number; bottom: number; left: number; right: number;
+}
+
+interface StageDefinition {
+    id: string;
+    name: string;
+    mainFloorY: number;
+    mainFloorX: number;
+    mainFloorW: number;
+    platforms: Platform[];
+    blastZone: BlastZone;
+    bgColor1: string;
+    bgColor2: string;
+    floorColor: string;
+    platformColor: string;
+    bgFeatures: string; // 'castle' | 'ocean' | 'lava' | 'forest'
+}
+
+const STAGES: StageDefinition[] = [
+    {
+        id: 'battlefield', name: 'Grudge Battlefield',
+        mainFloorY: 700, mainFloorX: 360, mainFloorW: 1200,
+        platforms: [
+            { x: 560, y: 540, w: 240, oneWay: true },
+            { x: 860, y: 420, w: 200, oneWay: true },
+            { x: 660, y: 300, w: 200, oneWay: true },
+        ],
+        blastZone: { top: -200, bottom: 1280, left: -300, right: 2220 },
+        bgColor1: '#0c1a0c', bgColor2: '#1a2e1a', floorColor: '#2d5a1e', platformColor: '#3a6b2a',
+        bgFeatures: 'castle',
+    },
+    {
+        id: 'pirate', name: "Pirate's Cove",
+        mainFloorY: 720, mainFloorX: 400, mainFloorW: 1100,
+        platforms: [
+            { x: 500, y: 560, w: 180, oneWay: true },
+            { x: 900, y: 480, w: 160, oneWay: true },
+            { x: 1200, y: 560, w: 180, oneWay: true },
+        ],
+        blastZone: { top: -200, bottom: 1280, left: -300, right: 2220 },
+        bgColor1: '#0a1628', bgColor2: '#1a2a4a', floorColor: '#5a3a1e', platformColor: '#6b4a2e',
+        bgFeatures: 'ocean',
+    },
+    {
+        id: 'fortress', name: 'Dark Fortress',
+        mainFloorY: 700, mainFloorX: 460, mainFloorW: 1000,
+        platforms: [],
+        blastZone: { top: -200, bottom: 1280, left: -300, right: 2220 },
+        bgColor1: '#0a0a14', bgColor2: '#1a1020', floorColor: '#2a1a2a', platformColor: '#3a2a3a',
+        bgFeatures: 'lava',
+    },
+    {
+        id: 'canopy', name: 'Elven Canopy',
+        mainFloorY: 750, mainFloorX: 300, mainFloorW: 1300,
+        platforms: [
+            { x: 420, y: 580, w: 200, oneWay: true },
+            { x: 720, y: 460, w: 180, oneWay: true },
+            { x: 1020, y: 340, w: 200, oneWay: true },
+            { x: 1280, y: 520, w: 160, oneWay: true },
+        ],
+        blastZone: { top: -200, bottom: 1280, left: -300, right: 2220 },
+        bgColor1: '#0a1a0a', bgColor2: '#102a10', floorColor: '#1e4a1e', platformColor: '#2a5a2a',
+        bgFeatures: 'forest',
+    },
+];
+
+// ─── Dynamic camera ──────────────────────────────────────────────
+interface CameraState {
+    x: number;
+    y: number;
+    zoom: number;
+}
+
+function updateCamera(cam: CameraState, p1: FighterRuntime, p2: FighterRuntime): CameraState {
+    const midX = (p1.x + p2.x) / 2;
+    const midY = (p1.y + p2.y) / 2;
+    const dx = Math.abs(p1.x - p2.x);
+    const dy = Math.abs(p1.y - p2.y);
+    const maxSpan = Math.max(dx + 400, dy + 300);
+    const targetZoom = clamp(VIEWPORT_W / maxSpan, 0.45, 1.3);
+    const targetX = midX - (VIEWPORT_W / targetZoom) / 2;
+    const targetY = midY - (VIEWPORT_H / targetZoom) / 2 - 60;
+    const lerp = 0.06;
+    return {
+        x: cam.x + (targetX - cam.x) * lerp,
+        y: cam.y + (targetY - cam.y) * lerp,
+        zoom: cam.zoom + (targetZoom - cam.zoom) * lerp,
+    };
+}
 
 const P1_CONTROLS = {
     left: "a",
@@ -177,21 +282,26 @@ interface ActiveEffect {
 }
 
 // Convert GRUDA roster data into CharacterDef for the fighter engine
+// frameSize is used to calculate correct frame widths (sprites aren't all 100x100)
 function grudaToCharDef(g: GrudaCharDef): CharacterDef {
     const base = `/fighter2d/characters/${g.folder}/`;
-    const s = (file: string, frames: number, hold: number, loop: boolean) => ({ src: base + file, frames, hold, loop });
+    // hold = frames per tick; higher frame count anims need faster hold to not drag
+    const autoHold = (frames: number) => frames > 20 ? 2 : frames > 10 ? 3 : frames > 6 ? 4 : 5;
+    const s = (file: string, frames: number, loop: boolean) => ({
+        src: base + file, frames, hold: autoHold(frames), loop,
+    });
     return {
         id: g.id,
         name: g.name,
         color: g.color,
         sprites: {
-            idle:    s(g.idle[0], g.idle[1], 6, true),
-            run:     s(g.walk[0], g.walk[1], 5, true),
-            jump:    s(g.jump?.[0] ?? g.idle[0], g.jump?.[1] ?? g.idle[1], 6, false),
-            fall:    s(g.idle[0], g.idle[1], 6, false),
-            attack:  s(g.attack[0], g.attack[1], 4, false),
-            takeHit: s(g.hurt[0], g.hurt[1], 5, false),
-            death:   s(g.death[0], g.death[1], 7, false),
+            idle:    s(g.idle[0], g.idle[1], true),
+            run:     s(g.walk[0], g.walk[1], true),
+            jump:    s(g.jump?.[0] ?? g.idle[0], g.jump?.[1] ?? g.idle[1], false),
+            fall:    s(g.idle[0], g.idle[1], false),
+            attack:  s(g.attack[0], g.attack[1], false),
+            takeHit: s(g.hurt[0], g.hurt[1], false),
+            death:   s(g.death[0], g.death[1], false),
         },
         moveSet: {
             name: g.name,
@@ -222,11 +332,12 @@ function clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
 }
 
-function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet): FighterRuntime {
+function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet, stage: StageDefinition): FighterRuntime {
+    const spawnX = id === "p1" ? stage.mainFloorX + 200 : stage.mainFloorX + stage.mainFloorW - 200;
     return {
         id,
-        x: id === "p1" ? 280 : 980,
-        y: FLOOR_Y,
+        x: spawnX,
+        y: stage.mainFloorY,
         vx: 0,
         vy: 0,
         width: 120,
@@ -234,6 +345,9 @@ function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet): Fighter
         facing: id === "p1" ? 1 : -1,
         hp: 100,
         maxHp: 100,
+        stocks: STARTING_STOCKS,
+        airJumpsLeft: MAX_AIR_JUMPS,
+        invulnUntil: 0,
         state: "idle",
         stateSince: performance.now(),
         frameIndex: 0,
@@ -248,6 +362,46 @@ function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet): Fighter
         lastStaminaRegen: performance.now(),
         moveSet,
     };
+}
+
+function respawnFighter(fighter: FighterRuntime, stage: StageDefinition): FighterRuntime {
+    const now = performance.now();
+    return {
+        ...fighter,
+        x: stage.mainFloorX + stage.mainFloorW / 2,
+        y: stage.mainFloorY - 300,
+        vx: 0,
+        vy: 0,
+        hp: 100,
+        airJumpsLeft: MAX_AIR_JUMPS,
+        invulnUntil: now + RESPAWN_INVULN_MS,
+        state: "fall",
+        stateSince: now,
+        frameIndex: 0,
+        frameTick: 0,
+        stateLockUntil: 0,
+        attackHasConnected: false,
+        counterUntil: 0,
+        superMeter: fighter.superMeter,
+        stamina: STAMINA_MAX,
+        lastStaminaRegen: now,
+    };
+}
+
+function isOnPlatform(fighter: FighterRuntime, stage: StageDefinition): number | null {
+    // Check main floor
+    if (fighter.vy >= 0 && fighter.y >= stage.mainFloorY - 2 && fighter.y <= stage.mainFloorY + 10
+        && fighter.x >= stage.mainFloorX && fighter.x <= stage.mainFloorX + stage.mainFloorW) {
+        return stage.mainFloorY;
+    }
+    // Check platforms (one-way: only land from above)
+    for (const p of stage.platforms) {
+        if (fighter.vy >= 0 && fighter.y >= p.y - 2 && fighter.y <= p.y + 10
+            && fighter.x >= p.x && fighter.x <= p.x + p.w) {
+            return p.y;
+        }
+    }
+    return null;
 }
 
 function hurtBox(fighter: FighterRuntime) {
@@ -294,6 +448,10 @@ function applyDamage(
     damage: number,
     now: number
 ): { target: FighterRuntime; attacker: FighterRuntime; wasCounter: boolean } {
+    // Invulnerability check (respawn protection)
+    if (target.invulnUntil > now) {
+        return { target, attacker, wasCounter: false };
+    }
     if (target.counterUntil > now && target.state !== "death") {
         const newAttackerHp = Math.max(0, attacker.hp - target.moveSet.counterDamage);
         const nextAttacker = setState(
@@ -378,7 +536,10 @@ function formatTime(seconds: number): string {
 export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const [p1Pick, setP1Pick] = useState<CharacterDef | null>(null);
     const [p2Pick, setP2Pick] = useState<CharacterDef | null>(null);
-    const [selectPhase, setSelectPhase] = useState<"mode" | "lobby" | "p1" | "p2" | "fight">("mode");
+    const [selectedStage, setSelectedStage] = useState<StageDefinition>(STAGES[0]);
+    const [selectPhase, setSelectPhase] = useState<"mode" | "lobby" | "p1" | "p2" | "stage" | "fight">("mode");
+    const stageRef = useRef<StageDefinition>(STAGES[0]);
+    const cameraRef = useRef<CameraState>({ x: 0, y: 0, zoom: 1 });
     const [joinCode, setJoinCode] = useState("");
     const pvp = usePvP();
 
@@ -388,7 +549,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const animationFrameRef = useRef<number | null>(null);
     const [isReady, setIsReady] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
-    const [hud, setHud] = useState({ p1Hp: 100, p2Hp: 100, p1Super: 0, p2Super: 0, winner: null as FighterId | null, elapsed: 0 });
+    const [hud, setHud] = useState({ p1Hp: 100, p2Hp: 100, p1Super: 0, p2Super: 0, p1Stocks: STARTING_STOCKS, p2Stocks: STARTING_STOCKS, p1AirJumps: MAX_AIR_JUMPS, p2AirJumps: MAX_AIR_JUMPS, winner: null as FighterId | null, elapsed: 0 });
     const [vsAI, setVsAI] = useState(true);
     const aiTimerRef = useRef(0);
 
@@ -424,17 +585,15 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const handleCharacterPick = useCallback((char: CharacterDef) => {
         if (selectPhase === "p1") {
             setP1Pick(char);
-            // If in PvP mode, send pick to server and wait
             if (pvp.state === "waiting" || pvp.state === "in-room") {
                 pvp.pickCharacter(char.id);
                 pvp.setReady();
-                // P2 pick will come from remote
                 return;
             }
             setSelectPhase("p2");
         } else if (selectPhase === "p2") {
             setP2Pick(char);
-            setSelectPhase("fight");
+            setSelectPhase("stage");
         }
     }, [selectPhase, pvp]);
 
@@ -446,7 +605,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         pvp.disconnect();
         assetsRef.current = null;
         worldRef.current = null;
-        setHud({ p1Hp: 100, p2Hp: 100, p1Super: 0, p2Super: 0, winner: null, elapsed: 0 });
+        setHud({ p1Hp: 100, p2Hp: 100, p1Super: 0, p2Super: 0, p1Stocks: STARTING_STOCKS, p2Stocks: STARTING_STOCKS, p1AirJumps: MAX_AIR_JUMPS, p2AirJumps: MAX_AIR_JUMPS, winner: null, elapsed: 0 });
         if (animationFrameRef.current !== null) {
             cancelAnimationFrame(animationFrameRef.current);
             animationFrameRef.current = null;
@@ -455,15 +614,17 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
     const resetMatch = useCallback(() => {
         if (!p1Pick || !p2Pick) return;
+        const stage = stageRef.current;
         worldRef.current = {
-            p1: createInitialFighter("p1", p1Pick.moveSet),
-            p2: createInitialFighter("p2", p2Pick.moveSet),
+            p1: createInitialFighter("p1", p1Pick.moveSet, stage),
+            p2: createInitialFighter("p2", p2Pick.moveSet, stage),
             projectiles: [],
             winner: null,
             startedAt: performance.now(),
             superFreeze: null,
         };
-        setHud({ p1Hp: 100, p2Hp: 100, p1Super: 0, p2Super: 0, winner: null, elapsed: 0 });
+        cameraRef.current = { x: stage.mainFloorX, y: stage.mainFloorY - 400, zoom: 1 };
+        setHud({ p1Hp: 100, p2Hp: 100, p1Super: 0, p2Super: 0, p1Stocks: STARTING_STOCKS, p2Stocks: STARTING_STOCKS, p1AirJumps: MAX_AIR_JUMPS, p2AirJumps: MAX_AIR_JUMPS, winner: null, elapsed: 0 });
     }, [p1Pick, p2Pick]);
 
     const queueNormalAttack = useCallback((fighterId: FighterId) => {
@@ -511,7 +672,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 owner: fighterId,
                 x: actor.x + actor.facing * 40,
                 y: actor.y - actor.height * 0.55,
-                vx: actor.facing * 10,
+                vx: actor.facing * 10 * SPEED_SCALE,
                 radius: 14,
                 damage: actor.moveSet.projectileDamage,
                 expiresAt: now + 1800,
@@ -582,10 +743,18 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         const now = performance.now();
         const actor = fighterId === "p1" ? world.p1 : world.p2;
         if (world.winner || actor.hp <= 0) return;
-        if (actor.y < FLOOR_Y - 1) return;
         if (now < actor.stateLockUntil) return;
-        const next = setState({ ...actor, vy: -actor.moveSet.jumpForce }, "jump", now);
-        if (fighterId === "p1") world.p1 = next; else world.p2 = next;
+        const stage = stageRef.current;
+        const grounded = stage ? isOnPlatform(actor, stage) !== null : actor.y >= 600;
+        if (grounded) {
+            // Ground jump
+            const next = setState({ ...actor, vy: -actor.moveSet.jumpForce * SPEED_SCALE, airJumpsLeft: MAX_AIR_JUMPS }, "jump", now);
+            if (fighterId === "p1") world.p1 = next; else world.p2 = next;
+        } else if (actor.airJumpsLeft > 0) {
+            // Air jump (double jump)
+            const next = setState({ ...actor, vy: -actor.moveSet.jumpForce * SPEED_SCALE * 0.85, airJumpsLeft: actor.airJumpsLeft - 1 }, "jump", now);
+            if (fighterId === "p1") world.p1 = next; else world.p2 = next;
+        }
     }, []);
 
     const queueSuper = useCallback((fighterId: FighterId) => {
@@ -618,7 +787,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
         // Spend up to 3 stamina, always try max
         const spend = Math.min(actor.stamina, STAMINA_COST_DASH);
-        const dashVx = actor.facing * spend * DASH_VX_PER_POINT;
+        const dashVx = actor.facing * spend * DASH_VX_PER_POINT * SPEED_SCALE;
 
         const next = setState(
             {
@@ -756,14 +925,17 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         if (selectPhase !== "fight" || !p1Pick || !p2Pick) return;
         let disposed = false;
 
+        stageRef.current = selectedStage;
+        const stage = stageRef.current;
         worldRef.current = {
-            p1: createInitialFighter("p1", p1Pick.moveSet),
-            p2: createInitialFighter("p2", p2Pick.moveSet),
+            p1: createInitialFighter("p1", p1Pick.moveSet, stage),
+            p2: createInitialFighter("p2", p2Pick.moveSet, stage),
             projectiles: [],
             winner: null,
             startedAt: performance.now(),
             superFreeze: null,
         };
+        cameraRef.current = { x: stage.mainFloorX, y: stage.mainFloorY - 400, zoom: 1 };
 
         const maybeLoad = (src?: string) => src ? loadImage(src).catch(() => null) : Promise.resolve(null);
 
@@ -873,8 +1045,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         ) => {
             const currentSprite = sprites[fighter.state];
             const sourceX = fighter.frameIndex * currentSprite.frameWidth;
-            const drawWidth = currentSprite.frameWidth * 3;
-            const drawHeight = currentSprite.frameHeight * 3;
+            // Scale all characters to ~300px tall regardless of original frame size
+            const targetHeight = 300;
+            const scale = targetHeight / currentSprite.frameHeight;
+            const drawWidth = currentSprite.frameWidth * scale;
+            const drawHeight = currentSprite.frameHeight * scale;
             const drawX = fighter.x - drawWidth / 2;
             const drawY = fighter.y - drawHeight;
 
@@ -888,6 +1063,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 ctx.translate(drawX + drawWidth / 2, 0);
                 ctx.scale(-1, 1);
                 ctx.translate(-(drawX + drawWidth / 2), 0);
+            }
+
+            // Invulnerability flicker (respawn protection)
+            if (fighter.invulnUntil > now && Math.floor(now / 80) % 2 === 0) {
+                ctx.globalAlpha = 0.3;
             }
 
             // Hurt flash: alternate visibility
@@ -955,6 +1135,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             const assets = assetsRef.current;
             if (!assets) return;
             const now = performance.now();
+            const stage = stageRef.current;
+            const cam = cameraRef.current;
 
             // Screen shake offset
             let shakeX = 0, shakeY = 0;
@@ -965,28 +1147,74 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             }
 
             ctx.save();
+            ctx.clearRect(0, 0, VIEWPORT_W, VIEWPORT_H);
+
+            // Dark fantasy background (parallax)
+            const bgGrad = ctx.createLinearGradient(0, 0, 0, VIEWPORT_H);
+            bgGrad.addColorStop(0, stage.bgColor1);
+            bgGrad.addColorStop(1, stage.bgColor2);
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(0, 0, VIEWPORT_W, VIEWPORT_H);
+
+            // Background features (drawn at half parallax speed)
+            const parallaxX = -cam.x * 0.3;
+            const parallaxY = -cam.y * 0.2;
+            ctx.save();
+            ctx.globalAlpha = 0.25;
+            if (stage.bgFeatures === 'castle') {
+                // Dark castle silhouettes
+                for (let i = 0; i < 5; i++) {
+                    const cx = parallaxX + 200 + i * 350;
+                    const ch = 80 + (i % 3) * 50;
+                    ctx.fillStyle = '#1a1a1a';
+                    ctx.fillRect(cx, VIEWPORT_H - 200 + parallaxY - ch, 60, ch);
+                    ctx.fillRect(cx - 10, VIEWPORT_H - 200 + parallaxY - ch - 20, 80, 20);
+                }
+            } else if (stage.bgFeatures === 'ocean') {
+                // Waves
+                ctx.fillStyle = '#0a2040';
+                for (let wx = 0; wx < VIEWPORT_W + 100; wx += 30) {
+                    const wy = VIEWPORT_H - 80 + parallaxY + Math.sin((wx + now / 20) * 0.03) * 15;
+                    ctx.fillRect(wx + parallaxX * 0.1, wy, 28, VIEWPORT_H);
+                }
+            } else if (stage.bgFeatures === 'lava') {
+                // Lava glow
+                ctx.fillStyle = `rgba(200, 50, 0, ${0.15 + 0.1 * Math.sin(now / 300)})`;
+                ctx.fillRect(0, VIEWPORT_H - 120, VIEWPORT_W, 120);
+            } else if (stage.bgFeatures === 'forest') {
+                // Tree silhouettes
+                ctx.fillStyle = '#0a1a0a';
+                for (let i = 0; i < 8; i++) {
+                    const tx = parallaxX + 100 + i * 200;
+                    const th = 100 + (i % 3) * 60;
+                    ctx.beginPath();
+                    ctx.moveTo(tx, VIEWPORT_H - 160 + parallaxY);
+                    ctx.lineTo(tx + 30, VIEWPORT_H - 160 + parallaxY - th);
+                    ctx.lineTo(tx + 60, VIEWPORT_H - 160 + parallaxY);
+                    ctx.fill();
+                }
+            }
+            ctx.restore();
+
+            // Camera transform
+            ctx.save();
             ctx.translate(shakeX, shakeY);
+            ctx.scale(cam.zoom, cam.zoom);
+            ctx.translate(-cam.x, -cam.y);
 
-            ctx.clearRect(-10, -10, ARENA_WIDTH + 20, ARENA_HEIGHT + 20);
+            // Draw main floor
+            ctx.fillStyle = stage.floorColor;
+            ctx.fillRect(stage.mainFloorX, stage.mainFloorY, stage.mainFloorW, 30);
+            ctx.fillStyle = 'rgba(255,255,255,0.1)';
+            ctx.fillRect(stage.mainFloorX, stage.mainFloorY, stage.mainFloorW, 3);
 
-            // Background
-            ctx.drawImage(assets.background, 0, 0, ARENA_WIDTH, ARENA_HEIGHT);
-            ctx.globalAlpha = 0.85;
-            ctx.drawImage(assets.castle, ARENA_WIDTH - 220, FLOOR_Y - 90, 200, 120);
-            ctx.globalAlpha = 1;
-
-            // Floor
-            const floorGradient = ctx.createLinearGradient(0, FLOOR_Y, 0, ARENA_HEIGHT);
-            floorGradient.addColorStop(0, "rgba(18, 22, 40, 0.4)");
-            floorGradient.addColorStop(1, "rgba(8, 10, 20, 0.95)");
-            ctx.fillStyle = floorGradient;
-            ctx.fillRect(0, FLOOR_Y, ARENA_WIDTH, ARENA_HEIGHT - FLOOR_Y);
-            ctx.strokeStyle = "rgba(255, 224, 140, 0.35)";
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(0, FLOOR_Y + 1);
-            ctx.lineTo(ARENA_WIDTH, FLOOR_Y + 1);
-            ctx.stroke();
+            // Draw platforms
+            for (const p of stage.platforms) {
+                ctx.fillStyle = stage.platformColor;
+                ctx.fillRect(p.x, p.y, p.w, 12);
+                ctx.fillStyle = 'rgba(255,255,255,0.15)';
+                ctx.fillRect(p.x, p.y, p.w, 2);
+            }
 
             // Fighters
             drawFighter(world.p1, assets.p1);
@@ -1047,42 +1275,78 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 ctx.restore();
             }
 
+            // End camera transform
+            ctx.restore();
+
+            // HUD (drawn in screen space, not world space)
+            // Stock pips
+            const drawStocks = (x: number, stocks: number, color: string) => {
+                for (let i = 0; i < STARTING_STOCKS; i++) {
+                    ctx.beginPath();
+                    ctx.arc(x + i * 22, VIEWPORT_H - 30, 7, 0, Math.PI * 2);
+                    ctx.fillStyle = i < stocks ? color : 'rgba(255,255,255,0.15)';
+                    ctx.fill();
+                    if (i < stocks) {
+                        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
+                }
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                ctx.font = '9px monospace';
+                ctx.fillText('STOCKS', x, VIEWPORT_H - 12);
+            };
+            drawStocks(40, world.p1.stocks, '#4ade80');
+            drawStocks(VIEWPORT_W - 160, world.p2.stocks, '#60a5fa');
+
+            // Jump pips (air jumps remaining)
+            const drawJumpPips = (x: number, airJumps: number) => {
+                for (let i = 0; i < MAX_AIR_JUMPS; i++) {
+                    ctx.beginPath();
+                    ctx.arc(x + i * 16, VIEWPORT_H - 50, 5, 0, Math.PI * 2);
+                    ctx.fillStyle = i < airJumps ? '#fbbf24' : 'rgba(255,255,255,0.1)';
+                    ctx.fill();
+                }
+                ctx.fillStyle = 'rgba(255,255,255,0.4)';
+                ctx.font = '8px monospace';
+                ctx.fillText('JUMPS', x, VIEWPORT_H - 40);
+            };
+            drawJumpPips(40, world.p1.airJumpsLeft);
+            drawJumpPips(VIEWPORT_W - 160, world.p2.airJumpsLeft);
+
             // Super meter bars
             const drawMeter = (x: number, meter: number, color: string) => {
                 ctx.fillStyle = "rgba(0,0,0,0.6)";
-                ctx.fillRect(x, FLOOR_Y + 20, 200, 12);
+                ctx.fillRect(x, VIEWPORT_H - 80, 200, 12);
                 ctx.fillStyle = meter >= SUPER_METER_MAX ? "#ffd700" : color;
-                ctx.fillRect(x + 1, FLOOR_Y + 21, (meter / SUPER_METER_MAX) * 198, 10);
+                ctx.fillRect(x + 1, VIEWPORT_H - 79, (meter / SUPER_METER_MAX) * 198, 10);
                 if (meter >= SUPER_METER_MAX) {
                     ctx.save();
                     ctx.globalAlpha = 0.4 + 0.3 * Math.sin(now / 100);
                     ctx.fillStyle = "#fff";
-                    ctx.fillRect(x + 1, FLOOR_Y + 21, 198, 10);
+                    ctx.fillRect(x + 1, VIEWPORT_H - 79, 198, 10);
                     ctx.restore();
                     ctx.fillStyle = "#ffd700"; ctx.font = "bold 11px monospace";
-                    ctx.fillText("R  SUPER", x + 60, FLOOR_Y + 30);
+                    ctx.fillText("R  SUPER", x + 60, VIEWPORT_H - 72);
                 }
             };
             drawMeter(40, world.p1.superMeter, "#4ade80");
-            drawMeter(ARENA_WIDTH - 240, world.p2.superMeter, "#60a5fa");
+            drawMeter(VIEWPORT_W - 240, world.p2.superMeter, "#60a5fa");
 
-            // Stamina pips (under super meter)
+            // Stamina pips
             const drawStamina = (x: number, stamina: number) => {
                 for (let i = 0; i < STAMINA_MAX; i++) {
                     const px = x + i * 28;
                     ctx.fillStyle = i < stamina ? "#38bdf8" : "rgba(255,255,255,0.1)";
-                    ctx.fillRect(px, FLOOR_Y + 36, 24, 8);
+                    ctx.fillRect(px, VIEWPORT_H - 64, 24, 8);
                     if (i < stamina) {
                         ctx.fillStyle = "rgba(255,255,255,0.3)";
-                        ctx.fillRect(px, FLOOR_Y + 36, 24, 3);
+                        ctx.fillRect(px, VIEWPORT_H - 64, 24, 3);
                     }
                 }
-                ctx.fillStyle = "rgba(255,255,255,0.4)";
-                ctx.font = "9px monospace";
-                ctx.fillText("STAMINA", x, FLOOR_Y + 55);
             };
             drawStamina(40, world.p1.stamina);
-            drawStamina(ARENA_WIDTH - 240, world.p2.stamina);
+            drawStamina(VIEWPORT_W - 240, world.p2.stamina);
 
             // Super freeze cutscene overlay
             if (world.superFreeze && now < world.superFreeze.until) {
@@ -1159,8 +1423,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
             let vx = fighter.vx;
             if (!isLocked && fighter.hp > 0) {
-                if (leftPressed && !rightPressed) vx = -fighter.moveSet.runSpeed;
-                else if (!leftPressed && rightPressed) vx = fighter.moveSet.runSpeed;
+                if (leftPressed && !rightPressed) vx = -fighter.moveSet.runSpeed * SPEED_SCALE;
+                else if (!leftPressed && rightPressed) vx = fighter.moveSet.runSpeed * SPEED_SCALE;
                 else vx *= FRICTION;
             } else {
                 vx *= 0.92;
@@ -1170,12 +1434,15 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             let y = fighter.y + fighter.vy;
             let vy = fighter.vy + GRAVITY;
 
-            if (y >= FLOOR_Y) {
-                y = FLOOR_Y;
+            // Platform collision
+            const stage = stageRef.current;
+            const floorY = isOnPlatform({ ...fighter, x, y, vy }, stage);
+            if (floorY !== null && vy >= 0) {
+                y = floorY;
                 vy = 0;
             }
 
-            x = clamp(x, 60, ARENA_WIDTH - 60);
+            // NO clamping to arena edges — fighters can fall off!
 
             const facing = opponent.x >= x ? 1 : -1;
             let next = {
@@ -1372,7 +1639,31 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 }
             }
 
-            const winner = nextP1.hp <= 0 ? "p2" : nextP2.hp <= 0 ? "p1" : null;
+            // Stock system: blast zone death + HP death
+            const stage = stageRef.current;
+            const bz = stage.blastZone;
+            const checkStockLoss = (f: FighterRuntime): FighterRuntime => {
+                const oob = f.x < bz.left || f.x > bz.right || f.y < bz.top || f.y > bz.bottom;
+                const hpDead = f.hp <= 0;
+                if (oob || hpDead) {
+                    const newStocks = f.stocks - 1;
+                    if (newStocks <= 0) {
+                        return { ...f, stocks: 0, hp: 0, state: "death" as AnimationState, stateSince: now };
+                    }
+                    return { ...respawnFighter(f, stage), stocks: newStocks };
+                }
+                return f;
+            };
+            nextP1 = checkStockLoss(nextP1);
+            nextP2 = checkStockLoss(nextP2);
+
+            // Reset air jumps on landing
+            const landingFloorP1 = isOnPlatform(nextP1, stage);
+            const landingFloorP2 = isOnPlatform(nextP2, stage);
+            if (landingFloorP1 !== null) nextP1 = { ...nextP1, airJumpsLeft: MAX_AIR_JUMPS };
+            if (landingFloorP2 !== null) nextP2 = { ...nextP2, airJumpsLeft: MAX_AIR_JUMPS };
+
+            const winner = nextP1.stocks <= 0 ? "p2" : nextP2.stocks <= 0 ? "p1" : null;
 
             world = {
                 ...world,
@@ -1382,23 +1673,22 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 winner,
             };
 
+            // Update camera
+            cameraRef.current = updateCamera(cameraRef.current, nextP1, nextP2);
+
             worldRef.current = world;
 
             setHud((prev) => {
                 const elapsed = (now - world.startedAt) / 1000;
-                if (
-                    prev.p1Hp === world.p1.hp &&
-                    prev.p2Hp === world.p2.hp &&
-                    prev.winner === world.winner &&
-                    Math.floor(prev.elapsed) === Math.floor(elapsed)
-                ) {
-                    return prev;
-                }
                 return {
                     p1Hp: world.p1.hp,
                     p2Hp: world.p2.hp,
                     p1Super: world.p1.superMeter,
                     p2Super: world.p2.superMeter,
+                    p1Stocks: world.p1.stocks,
+                    p2Stocks: world.p2.stocks,
+                    p1AirJumps: world.p1.airJumpsLeft,
+                    p2AirJumps: world.p2.airJumpsLeft,
                     winner: world.winner,
                     elapsed,
                 };
@@ -1526,6 +1816,52 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         );
     }
 
+    // ─── STAGE SELECT SCREEN ─────────────────────────────────────
+    if (selectPhase === "stage") {
+        return (
+            <div className="min-h-screen bg-slate-950 text-white p-4 md:p-6">
+                <div className="max-w-[900px] mx-auto space-y-6">
+                    <div className="flex items-center gap-3">
+                        <Button variant="ghost" className="text-white/80" onClick={() => setSelectPhase("p2")}>
+                            <ArrowLeft className="w-4 h-4 mr-2" /> Back
+                        </Button>
+                        <Badge className="bg-amber-500/20 text-amber-300 border-amber-300/30">Grudge Fighter</Badge>
+                    </div>
+                    <div className="text-center">
+                        <h1 className="text-3xl font-bold text-amber-300 font-serif">Select Stage</h1>
+                        <p className="text-white/50 mt-1">{p1Pick?.name} vs {p2Pick?.name}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-6">
+                        {STAGES.map(stage => (
+                            <button
+                                key={stage.id}
+                                onClick={() => { setSelectedStage(stage); stageRef.current = stage; setSelectPhase("fight"); }}
+                                className={`relative overflow-hidden rounded-xl border-2 p-6 text-left transition-all hover:scale-[1.02] ${
+                                    selectedStage.id === stage.id ? 'border-amber-400 bg-amber-400/10' : 'border-white/10 bg-slate-900/80 hover:border-amber-400/40'
+                                }`}
+                            >
+                                <div className="h-24 rounded-lg mb-3" style={{ background: `linear-gradient(135deg, ${stage.bgColor1}, ${stage.bgColor2})` }}>
+                                    <div className="h-full flex items-end justify-center pb-2">
+                                        <div className="rounded" style={{ width: `${stage.mainFloorW / 15}px`, height: 4, backgroundColor: stage.floorColor }} />
+                                        {stage.platforms.map((p, i) => (
+                                            <div key={i} className="rounded mx-1" style={{
+                                                width: `${p.w / 15}px`, height: 3,
+                                                backgroundColor: stage.platformColor,
+                                                marginBottom: `${(stage.mainFloorY - p.y) / 10}px`,
+                                            }} />
+                                        ))}
+                                    </div>
+                                </div>
+                                <h3 className="text-lg font-bold text-white">{stage.name}</h3>
+                                <p className="text-xs text-white/50">{stage.platforms.length} platforms · {stage.bgFeatures} theme</p>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     // ─── CHARACTER SELECT SCREEN ─────────────────────────────────
     if (selectPhase === "p1" || selectPhase === "p2") {
         const isPvPWaiting = pvp.state === "ready" || pvp.state === "waiting";
@@ -1562,11 +1898,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                                 onClick={() => handleCharacterPick(char)}
                                 className="group relative bg-slate-900/80 border border-white/10 rounded-lg p-4 hover:border-amber-400/60 hover:bg-slate-800/80 transition-all text-left"
                             >
-                                <div className="w-full h-20 flex items-center justify-center mb-3 overflow-hidden">
+                                <div className="w-full h-32 flex items-center justify-center mb-3 overflow-hidden bg-black/30 rounded">
                                     <img
-                                        src={char.sprites.idle.src}
+                                        src={char.sprites.attack.src}
                                         alt={char.name}
-                                        className="h-16 object-contain" style={{ imageRendering: "pixelated" }}
+                                        className="h-full w-full object-cover" style={{ imageRendering: "pixelated", objectPosition: "center" }}
                                     />
                                 </div>
                                 <div className="text-center">
@@ -1614,7 +1950,14 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 <Card className="relative overflow-hidden border-white/10 bg-slate-900/80">
                     <div className="p-4 border-b border-white/10 flex flex-wrap items-center gap-4 justify-between">
                         <div className="min-w-[260px]">
-                            <div className="text-sm text-white/70 mb-1" style={{ color: p1Pick?.color }}>P1: {p1Pick?.name}</div>
+                            <div className="text-sm text-white/70 mb-1 flex items-center gap-2" style={{ color: p1Pick?.color }}>
+                                P1: {p1Pick?.name}
+                                <span className="flex gap-1 ml-2">
+                                    {Array.from({ length: STARTING_STOCKS }, (_, i) => (
+                                        <span key={i} className={`inline-block w-2.5 h-2.5 rounded-full ${i < hud.p1Stocks ? 'bg-emerald-400' : 'bg-white/10'}`} />
+                                    ))}
+                                </span>
+                            </div>
                             <div className="grid grid-cols-10 gap-1">
                                 {Array.from({ length: 10 }, (_, idx) => (
                                     <div key={`p1-hp-${idx}`} className={`h-3 rounded-sm ${idx < Math.ceil(hud.p1Hp / 10) ? "bg-emerald-500" : "bg-white/10"}`} />
@@ -1622,7 +1965,14 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                             </div>
                         </div>
                         <div className="min-w-[260px]">
-                            <div className="text-sm text-white/70 mb-1 text-right" style={{ color: p2Pick?.color }}>P2: {p2Pick?.name}</div>
+                            <div className="text-sm text-white/70 mb-1 text-right flex items-center justify-end gap-2" style={{ color: p2Pick?.color }}>
+                                <span className="flex gap-1 mr-2">
+                                    {Array.from({ length: STARTING_STOCKS }, (_, i) => (
+                                        <span key={i} className={`inline-block w-2.5 h-2.5 rounded-full ${i < hud.p2Stocks ? 'bg-sky-400' : 'bg-white/10'}`} />
+                                    ))}
+                                </span>
+                                P2: {p2Pick?.name}
+                            </div>
                             <div className="grid grid-cols-10 gap-1">
                                 {Array.from({ length: 10 }, (_, idx) => (
                                     <div key={`p2-hp-${idx}`} className={`h-3 rounded-sm ${idx < Math.ceil(hud.p2Hp / 10) ? "bg-sky-400" : "bg-white/10"}`} />
@@ -1631,7 +1981,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                         </div>
                     </div>
 
-                    <canvas ref={canvasRef} width={ARENA_WIDTH} height={ARENA_HEIGHT} className="w-full h-auto max-h-[70vh] block bg-black" />
+                    <canvas ref={canvasRef} width={VIEWPORT_W} height={VIEWPORT_H} className="w-full h-auto max-h-[70vh] block bg-black" />
 
                     {!isReady && !loadError && (
                         <div className="absolute inset-0 bg-black/60 grid place-items-center text-white/80 text-lg">Loading sprites...</div>
