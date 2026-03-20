@@ -81,7 +81,7 @@ export function MainMenu({
           className="text-center mb-10"
         >
           <h1 className="font-serif text-6xl md:text-8xl font-black tracking-wider gold-text text-shadow-gold drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]">
-            GRUDGES
+            GRUDGE
           </h1>
           <motion.p
             initial={{ opacity: 0, scale: 0.9 }}
@@ -90,7 +90,7 @@ export function MainMenu({
             className="font-display text-2xl md:text-4xl tracking-[0.3em] uppercase mt-1"
             style={{ color: "hsl(0 70% 45%)" }}
           >
-            ALPHA
+            SMASH
           </motion.p>
 
           <motion.div
@@ -252,7 +252,7 @@ export function MainMenu({
           className="absolute bottom-4 left-1/2 -translate-x-1/2"
         >
           <p className="text-[10px] text-white/20 font-body tracking-widest">
-            GRUDGE STUDIO · ALPHA BUILD
+            GRUDGE SMASH · GRUDGE STUDIO
           </p>
         </motion.div>
       </div>

@@ -16,21 +16,34 @@
 
 ## Current Deployment
 
-### Frontend
-- Deployed to **Vercel** via GitHub auto-deploy
+### Frontend (Vercel)
+- Auto-deploys from `MolochDaGod/Grudge-RPG-Sprite-Attack` on push to `main`
 - URL: `grudge-rpg-sprite-attack-grudgenexus.vercel.app`
+- ToonAdmin: `grudge-rpg-sprite-attack-grudgenexus.vercel.app/#toonadmin`
 
-### Game Server (Puter)
-- App ID: `app-f9ad7ff9-1a2e-4bb0-a20a-8db9db03a620`
-- URL: `https://grudge-server-ambkk.puter.site`
-- The client connects to this URL for PvP WebSocket
+### PvP Server (Railway)
+- Repo: `MolochDaGod/grudge-pvp-server`
+- URL: `https://grudge-pvp-server-production.up.railway.app`
+- Health check: `https://grudge-pvp-server-production.up.railway.app/health`
+- Socket.io path: `/pvp`
+
+### Landing Page (GitHub Pages)
+- URL: `molochdagod.github.io/Grudge-RPG-Sprite-Attack`
+- Source: `docs/` folder on `main` branch
+
+### Grudge Backend Integration
+The game connects to the Grudge Studio backend ecosystem:
+- **PvP Server**: Railway (`grudge-pvp-server-production.up.railway.app`)
+- **Domain**: Can be proxied via `fighter-api.grudge-studio.com` on Cloudflare
+- **Object Storage**: Sprite assets served from Vercel static build
+- **Future**: Character configs can be stored on Grudge backend DB instead of localStorage
 
 ### Configuring the Server URL
 Set in the frontend via environment variable:
 ```
-VITE_PVP_SERVER_URL=https://grudge-server-ambkk.puter.site
+VITE_PVP_SERVER_URL=https://grudge-pvp-server-production.up.railway.app
 ```
-Default is the Puter URL above. Override for local dev or alternative backends.
+Falls back to `window.location.origin` for local dev (`npm run dev`).
 
 ## Deploying the Game Server
 

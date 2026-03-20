@@ -1,14 +1,16 @@
 # Grudge Fighter
 
-A 2D sprite-based fighting game with AI opponents, online PvP, a stamina resource system, and Smash Bros-style super attacks.
+A 2D sprite-based fighting game with 38 playable characters, AI opponents, online PvP, a stamina system, and Smash Bros-style super attacks.
 
 **Play Now:** [grudge-rpg-sprite-attack.vercel.app](https://grudge-rpg-sprite-attack-grudgenexus.vercel.app)
 **Landing Page:** [molochdagod.github.io/Grudge-RPG-Sprite-Attack](https://molochdagod.github.io/Grudge-RPG-Sprite-Attack)
+**Character Editor:** [#toonadmin](https://grudge-rpg-sprite-attack-grudgenexus.vercel.app/#toonadmin)
+**PvP Server:** [grudge-pvp-server-production.up.railway.app](https://grudge-pvp-server-production.up.railway.app)
 
 ## Features
 
-### 7 Playable Characters
-Knight, Archer, Wizard, Orc, Armored Skeleton, Swordsman, Priest — each with unique animations (idle, walk, attack, hurt, death), attack effects, move sets, and super attacks.
+### 38 Playable Characters
+Knight, Archer, Wizard, Orc, Dark Knight, Fire Knight, Elf Ranger, Elf Mage, Barbarian, Necromancer, Pirate Captain, Gunslinger, Shadow Warrior, Fire Wizard, Lightning Mage, Crossbowman, Werebear, Werewolf, Arcane Archer, Leaf Ranger, Martial Hero, Free Knight, Nightborne, Wind Hashashin, Water Priestess, Shardsoul Slayer, Loreon Knight, Elite Orc, Evil Wizard, and more. Each with unique sprites from GRUDA Wars, attack effects, projectiles, and super attacks.
 
 ### Combat System
 - **Melee** (Q/E) — free basic attacks
@@ -45,12 +47,22 @@ Socket.io room-based matchmaking with 4-character room codes. Input relay archit
 - Mouse (LMB = dash, RMB = block)
 - Gamepad (A/X=attack, B=ranged, Y=jump, RT=dash, LT=block, RB=super)
 
+### ToonAdmin — Character Editor
+Full admin tool at `#toonadmin` for editing all 38 characters:
+- Live animated sprite preview with scale control (1x–8x)
+- Remap any animation to any game action (Q attack, E attack, block, cast, etc.)
+- Adjust animation speed (hold frames) and loop behavior
+- Edit ATK, SPD, Super DMG stats
+- Save to localStorage (game reads overrides on load)
+- Import/Export JSON configs
+
 ## Tech Stack
 
 - **Frontend** — React 18, Vite 6, Tailwind CSS, Canvas 2D
-- **Backend** — Express, Node.js, Socket.io (PvP), PostgreSQL
-- **Deployment** — Vercel (frontend), Docker/Puter (game server)
-- **Assets** — GrudgeRPGAssets2d 100×100 sprite sheets at 3× scale
+- **PvP Server** — Node.js + Socket.io on Railway
+- **Backend** — Express, PostgreSQL (Drizzle ORM), Grudge Studio backend
+- **Deployment** — Vercel (frontend), Railway (PvP), Docker (fullstack)
+- **Assets** — GRUDA Wars sprite sheets (48–200px frames, scaled to 300px)
 
 ## Quick Start
 
@@ -65,20 +77,24 @@ See [docs/GAME_SERVER_DEPLOYMENT.md](docs/GAME_SERVER_DEPLOYMENT.md) for server 
 
 ```
 client/
-  src/pages/GrudgeFighter2D.tsx   # Main fighter game (~1700 lines)
-  src/hooks/usePvP.ts             # Socket.io PvP client hook
+  src/
+    pages/GrudgeFighter2D.tsx    # Main fighter game
+    pages/ToonAdmin.tsx          # Character editor admin tool
+    hooks/usePvP.ts              # Socket.io PvP client hook
+    lib/grudaRoster.ts           # 38-character roster data
+    lib/charConfig.ts            # Character config persistence
   public/fighter2d/
-    characters/                   # 7 character sprite sheets
-    effects/                      # Attack effect sprite strips
-    projectiles/                  # Arrow, fireball sprites
+    characters/                  # 38 character sprite folders
+    effects/                     # Attack effect sprite strips
+    projectiles/                 # Arrow, fireball, bullet, axe sprites
 server/
-  pvp.ts                          # Socket.io PvP room server
-  index.ts                        # Express entry point
-  routes.ts                       # API routes
+  pvp.ts                         # Socket.io PvP room server
+  index.ts                       # Express entry point
+  routes.ts                      # API routes
 docs/
-  index.html                      # GitHub Pages landing page
-  GAME_SERVER_DEPLOYMENT.md       # Server deployment guide
-  ENVIRONMENT_SETUP.md            # Environment setup
+  index.html                     # GitHub Pages landing page
+  editor.html                    # Static character editor
+  GAME_SERVER_DEPLOYMENT.md      # Server deployment guide
 ```
 
 ## Controls
