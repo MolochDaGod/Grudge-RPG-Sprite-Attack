@@ -89,6 +89,10 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // PvP WebSocket server
+  const { setupPvP } = await import("./pvp");
+  setupPvP(httpServer);
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { ArrowLeft, Crosshair, Shield, Zap } from "lucide-react";
+import { ArrowLeft, Crosshair, Shield, Zap, Wifi, Globe } from "lucide-react";
+import { usePvP } from "@/hooks/usePvP";
 
 type FighterId = "p1" | "p2";
 type AnimationState = "idle" | "run" | "jump" | "fall" | "attack" | "takeHit" | "death";
@@ -465,7 +466,9 @@ function formatTime(seconds: number): string {
 export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const [p1Pick, setP1Pick] = useState<CharacterDef | null>(null);
     const [p2Pick, setP2Pick] = useState<CharacterDef | null>(null);
-    const [selectPhase, setSelectPhase] = useState<"p1" | "p2" | "fight">("p1");
+    const [selectPhase, setSelectPhase] = useState<"mode" | "lobby" | "p1" | "p2" | "fight">("mode");
+    const [joinCode, setJoinCode] = useState("");
+    const pvp = usePvP();
 
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const worldRef = useRef<WorldState | null>(null);
@@ -492,21 +495,43 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const screenShakeRef = useRef({ intensity: 0, until: 0 });
     const hitFlashRef = useRef<{ target: FighterId; until: number } | null>(null);
 
+    // When PvP fight starts, set both picks from server data
+    useEffect(() => {
+        if (pvp.state === "fighting" && pvp.fightData) {
+            const p1Char = CHARACTER_ROSTER.find(c => c.id === pvp.fightData!.p1Character);
+            const p2Char = CHARACTER_ROSTER.find(c => c.id === pvp.fightData!.p2Character);
+            if (p1Char && p2Char) {
+                setP1Pick(p1Char);
+                setP2Pick(p2Char);
+                setVsAI(false);
+                setSelectPhase("fight");
+            }
+        }
+    }, [pvp.state, pvp.fightData]);
+
     const handleCharacterPick = useCallback((char: CharacterDef) => {
         if (selectPhase === "p1") {
             setP1Pick(char);
+            // If in PvP mode, send pick to server and wait
+            if (pvp.state === "waiting" || pvp.state === "in-room") {
+                pvp.pickCharacter(char.id);
+                pvp.setReady();
+                // P2 pick will come from remote
+                return;
+            }
             setSelectPhase("p2");
         } else if (selectPhase === "p2") {
             setP2Pick(char);
             setSelectPhase("fight");
         }
-    }, [selectPhase]);
+    }, [selectPhase, pvp]);
 
     const resetToSelect = useCallback(() => {
         setP1Pick(null);
         setP2Pick(null);
-        setSelectPhase("p1");
+        setSelectPhase("mode");
         setIsReady(false);
+        pvp.disconnect();
         assetsRef.current = null;
         worldRef.current = null;
         setHud({ p1Hp: 100, p2Hp: 100, p1Super: 0, p2Super: 0, winner: null, elapsed: 0 });
@@ -1375,17 +1400,121 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         return null;
     }, [hud.winner, p1Pick, p2Pick]);
 
+    // ─── MODE SELECT ─────────────────────────────────────────────
+    if (selectPhase === "mode") {
+        return (
+            <div className="min-h-screen bg-slate-950 text-white p-4 md:p-6">
+                <div className="max-w-[600px] mx-auto space-y-8 pt-20">
+                    <div className="text-center space-y-2">
+                        <h1 className="text-4xl font-bold text-amber-300 font-serif">Grudge Fighter</h1>
+                        <p className="text-white/50">Choose your mode</p>
+                    </div>
+                    <div className="space-y-4">
+                        <Button onClick={() => { setVsAI(true); setSelectPhase("p1"); }} className="w-full h-16 text-lg bg-emerald-600 hover:bg-emerald-500">
+                            <Shield className="w-5 h-5 mr-3" /> vs AI
+                        </Button>
+                        <Button onClick={() => { setVsAI(false); setSelectPhase("p1"); }} className="w-full h-16 text-lg bg-blue-600 hover:bg-blue-500">
+                            <Zap className="w-5 h-5 mr-3" /> Local 2-Player
+                        </Button>
+                        <Button onClick={() => { pvp.connect(); setSelectPhase("lobby"); }} className="w-full h-16 text-lg bg-purple-600 hover:bg-purple-500">
+                            <Globe className="w-5 h-5 mr-3" /> Online PvP
+                        </Button>
+                    </div>
+                    <Button variant="ghost" className="text-white/50 mx-auto block" onClick={onBack}>
+                        <ArrowLeft className="w-4 h-4 mr-2" /> Back
+                    </Button>
+                </div>
+            </div>
+        );
+    }
+
+    // ─── ONLINE LOBBY ──────────────────────────────────────────────
+    if (selectPhase === "lobby") {
+        return (
+            <div className="min-h-screen bg-slate-950 text-white p-4 md:p-6">
+                <div className="max-w-[600px] mx-auto space-y-6 pt-12">
+                    <div className="flex items-center gap-3">
+                        <Button variant="ghost" className="text-white/80" onClick={() => { pvp.disconnect(); setSelectPhase("mode"); }}>
+                            <ArrowLeft className="w-4 h-4 mr-2" /> Back
+                        </Button>
+                        <Badge className="bg-purple-500/20 text-purple-300 border-purple-300/30">
+                            <Wifi className="w-3 h-3 mr-1" /> Online PvP
+                        </Badge>
+                        <Badge variant="outline" className="border-white/20 text-white/60">{pvp.state}</Badge>
+                    </div>
+
+                    {pvp.error && (
+                        <Card className="p-3 bg-red-950/70 border-red-500/40 text-red-200 text-sm">{pvp.error}</Card>
+                    )}
+
+                    {pvp.state === "connected" && !pvp.roomId && (
+                        <div className="space-y-4">
+                            <Card className="p-6 bg-slate-900/80 border-white/10 text-center space-y-4">
+                                <h2 className="text-xl font-bold text-amber-300">Create a Room</h2>
+                                <p className="text-white/60 text-sm">Create a room and share the code with your opponent</p>
+                                <Button onClick={() => pvp.createRoom()} className="bg-amber-600 hover:bg-amber-500">Create Room</Button>
+                            </Card>
+                            <Card className="p-6 bg-slate-900/80 border-white/10 text-center space-y-4">
+                                <h2 className="text-xl font-bold text-sky-300">Join a Room</h2>
+                                <div className="flex gap-2 justify-center">
+                                    <input
+                                        value={joinCode}
+                                        onChange={(e) => setJoinCode(e.target.value.toUpperCase().slice(0, 4))}
+                                        placeholder="ABCD"
+                                        className="bg-slate-800 border border-white/20 rounded px-4 py-2 text-center text-2xl font-mono tracking-widest w-40 uppercase"
+                                        maxLength={4}
+                                    />
+                                    <Button onClick={() => pvp.joinRoom(joinCode)} disabled={joinCode.length < 4} className="bg-sky-600 hover:bg-sky-500">Join</Button>
+                                </div>
+                            </Card>
+                        </div>
+                    )}
+
+                    {pvp.roomId && pvp.state !== "fighting" && (
+                        <Card className="p-8 bg-slate-900/80 border-amber-400/20 text-center space-y-4">
+                            <div className="text-white/60 text-sm">Room Code</div>
+                            <div className="text-5xl font-mono font-bold text-amber-300 tracking-[0.3em]">{pvp.roomId}</div>
+                            <div className="text-white/50 text-sm">Share this code with your opponent</div>
+                            {pvp.state === "in-room" && <p className="text-white/40 animate-pulse">Waiting for opponent to join...</p>}
+                            {(pvp.state === "waiting" || pvp.state === "ready") && (
+                                <div className="space-y-2">
+                                    <p className="text-emerald-400">Opponent joined! Pick your character below.</p>
+                                    <Button onClick={() => setSelectPhase("p1")} className="bg-amber-600 hover:bg-amber-500">Pick Character</Button>
+                                </div>
+                            )}
+                        </Card>
+                    )}
+
+                    {pvp.state === "disconnected" && (
+                        <Card className="p-6 bg-slate-900/80 border-white/10 text-center space-y-3">
+                            <p className="text-white/60">Connecting to Grudge Server...</p>
+                            <Button onClick={() => pvp.connect()} variant="secondary">Retry</Button>
+                        </Card>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
     // ─── CHARACTER SELECT SCREEN ─────────────────────────────────
-    if (selectPhase !== "fight") {
+    if (selectPhase === "p1" || selectPhase === "p2") {
+        const isPvPWaiting = pvp.state === "ready" || pvp.state === "waiting";
         return (
             <div className="min-h-screen bg-slate-950 text-white p-4 md:p-6">
                 <div className="max-w-[1100px] mx-auto space-y-6">
                     <div className="flex items-center gap-3">
-                        <Button variant="ghost" className="text-white/80 hover:text-white" onClick={onBack}>
+                        <Button variant="ghost" className="text-white/80 hover:text-white" onClick={() => setSelectPhase(pvp.roomId ? "lobby" : "mode")}>
                             <ArrowLeft className="w-4 h-4 mr-2" /> Back
                         </Button>
                         <Badge className="bg-amber-500/20 text-amber-300 border-amber-300/30">Grudge Fighter</Badge>
+                        {pvp.roomId && <Badge className="bg-purple-500/20 text-purple-300">Online · {pvp.roomId}</Badge>}
                     </div>
+
+                    {isPvPWaiting && selectPhase === "p1" && (
+                        <Card className="p-3 bg-purple-950/50 border-purple-400/30 text-purple-200 text-sm text-center">
+                            Pick your character — opponent is picking too. Fight starts when both are ready.
+                        </Card>
+                    )}
 
                     <div className="text-center space-y-2">
                         <h1 className="text-3xl font-bold text-amber-300 font-serif">
