@@ -31,12 +31,14 @@ interface CharacterMoveSet {
     neutralSpecialName: string;
     upSpecialName: string;
     downSpecialName: string;
+    superName: string;
     runSpeed: number;
     jumpForce: number;
     baseDamage: number;
     projectileDamage: number;
     upSpecialDamage: number;
     counterDamage: number;
+    superDamage: number;
 }
 
 interface RuntimeSprite {
@@ -66,6 +68,7 @@ interface FighterRuntime {
     attackHasConnected: boolean;
     counterUntil: number;
     specialCooldownUntil: number;
+    superMeter: number;
     moveSet: CharacterMoveSet;
 }
 
@@ -86,6 +89,7 @@ interface WorldState {
     projectiles: Projectile[];
     winner: FighterId | null;
     startedAt: number;
+    superFreeze: { attacker: FighterId; until: number; damageAt: number; dealt: boolean } | null;
 }
 
 interface GrudgeFighter2DProps {
@@ -102,8 +106,10 @@ const P1_CONTROLS = {
     left: "a",
     right: "d",
     jump: "w",
-    normal: "q",
-    special: "e",
+    attack1: "q",
+    attack2: "e",
+    ranged: "f",
+    super: "r",
     down: "s",
 };
 
@@ -111,10 +117,18 @@ const P2_CONTROLS = {
     left: "arrowleft",
     right: "arrowright",
     jump: "arrowup",
-    normal: "/",
-    special: ".",
+    attack1: "/",
+    attack2: ".",
+    ranged: ";",
+    super: "'",
     down: "arrowdown",
 };
+
+const SUPER_METER_MAX = 100;
+const SUPER_METER_ON_HIT = 12;
+const SUPER_METER_ON_HURT = 8;
+const SUPER_FREEZE_DURATION = 800;
+const SUPER_DAMAGE_MULTIPLIER = 3;
 
 // ─── Character Roster (GrudgeRPG 100x100 sprites) ───────────────────────
 
@@ -177,9 +191,9 @@ const CHARACTER_ROSTER: CharacterDef[] = [
         moveSet: {
             name: "Knight", normalName: "Broadsword Slash",
             neutralSpecialName: "Shield Throw (Ranged)", upSpecialName: "Skyward Cleave",
-            downSpecialName: "Iron Bulwark (Counter)",
+            downSpecialName: "Iron Bulwark (Counter)", superName: "Divine Judgment",
             runSpeed: 5.6, jumpForce: 16, baseDamage: 13, projectileDamage: 10,
-            upSpecialDamage: 14, counterDamage: 20,
+            upSpecialDamage: 14, counterDamage: 20, superDamage: 35,
         },
         attackEffect: { src: "/fighter2d/effects/Knight-Attack03_Effect.png", frames: 11, hold: 3 },
     },
@@ -194,9 +208,9 @@ const CHARACTER_ROSTER: CharacterDef[] = [
         moveSet: {
             name: "Archer", normalName: "Quick Shot",
             neutralSpecialName: "Piercing Arrow (Ranged)", upSpecialName: "Aerial Volley",
-            downSpecialName: "Evade Counter",
+            downSpecialName: "Evade Counter", superName: "Storm of Arrows",
             runSpeed: 6.8, jumpForce: 17.5, baseDamage: 9, projectileDamage: 15,
-            upSpecialDamage: 11, counterDamage: 16,
+            upSpecialDamage: 11, counterDamage: 16, superDamage: 30,
         },
         attackEffect: { src: "/fighter2d/effects/Archer-Attack02_Effect.png", frames: 12, hold: 3 },
         projectileSrc: "/fighter2d/projectiles/Arrow.png",
@@ -213,9 +227,9 @@ const CHARACTER_ROSTER: CharacterDef[] = [
         moveSet: {
             name: "Wizard", normalName: "Arcane Blast",
             neutralSpecialName: "Fireball (Ranged)", upSpecialName: "Teleport Strike",
-            downSpecialName: "Mana Shield (Counter)",
+            downSpecialName: "Mana Shield (Counter)", superName: "Arcane Apocalypse",
             runSpeed: 5.4, jumpForce: 16.5, baseDamage: 10, projectileDamage: 16,
-            upSpecialDamage: 12, counterDamage: 22,
+            upSpecialDamage: 12, counterDamage: 22, superDamage: 40,
         },
         attackEffect: { src: "/fighter2d/effects/Wizard-Attack01_Effect.png", frames: 10, hold: 3 },
         projectileSrc: "/fighter2d/projectiles/Wizard-Projectile.png",
@@ -232,9 +246,9 @@ const CHARACTER_ROSTER: CharacterDef[] = [
         moveSet: {
             name: "Orc", normalName: "Axe Swing",
             neutralSpecialName: "Boulder Toss (Ranged)", upSpecialName: "Leap Slam",
-            downSpecialName: "Berserker Rage (Counter)",
+            downSpecialName: "Berserker Rage (Counter)", superName: "Waaagh! Smash",
             runSpeed: 5.0, jumpForce: 15, baseDamage: 15, projectileDamage: 12,
-            upSpecialDamage: 16, counterDamage: 18,
+            upSpecialDamage: 16, counterDamage: 18, superDamage: 38,
         },
         attackEffect: { src: "/fighter2d/effects/Orc-attack01_Effect.png", frames: 6, hold: 4 },
     },
@@ -250,9 +264,9 @@ const CHARACTER_ROSTER: CharacterDef[] = [
         moveSet: {
             name: "Armored Skeleton", normalName: "Bone Slash",
             neutralSpecialName: "Cursed Bolt (Ranged)", upSpecialName: "Death Dive",
-            downSpecialName: "Undead Guard (Counter)",
+            downSpecialName: "Undead Guard (Counter)", superName: "Soul Harvest",
             runSpeed: 5.8, jumpForce: 16, baseDamage: 11, projectileDamage: 13,
-            upSpecialDamage: 13, counterDamage: 19,
+            upSpecialDamage: 13, counterDamage: 19, superDamage: 32,
         },
         attackEffect: { src: "/fighter2d/effects/Armored Skeleton-Attack02_Effect.png", frames: 9, hold: 3 },
     },
@@ -268,9 +282,9 @@ const CHARACTER_ROSTER: CharacterDef[] = [
         moveSet: {
             name: "Swordsman", normalName: "Swift Cut",
             neutralSpecialName: "Blade Wave (Ranged)", upSpecialName: "Rising Slash",
-            downSpecialName: "Parry (Counter)",
+            downSpecialName: "Parry (Counter)", superName: "Thousand Cuts",
             runSpeed: 6.4, jumpForce: 17, baseDamage: 12, projectileDamage: 11,
-            upSpecialDamage: 13, counterDamage: 17,
+            upSpecialDamage: 13, counterDamage: 17, superDamage: 33,
         },
         attackEffect: { src: "/fighter2d/effects/Swordsman-Attack01_Effect.png", frames: 7, hold: 3 },
     },
@@ -285,9 +299,9 @@ const CHARACTER_ROSTER: CharacterDef[] = [
         moveSet: {
             name: "Priest", normalName: "Holy Strike",
             neutralSpecialName: "Smite (Ranged)", upSpecialName: "Ascension",
-            downSpecialName: "Divine Shield (Counter)",
+            downSpecialName: "Divine Shield (Counter)", superName: "Holy Smite",
             runSpeed: 5.2, jumpForce: 16, baseDamage: 9, projectileDamage: 14,
-            upSpecialDamage: 10, counterDamage: 24,
+            upSpecialDamage: 10, counterDamage: 24, superDamage: 36,
         },
         attackEffect: { src: "/fighter2d/effects/Priest-Attack_effect.png", frames: 5, hold: 4 },
     },
@@ -318,6 +332,7 @@ function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet): Fighter
         attackHasConnected: false,
         counterUntil: 0,
         specialCooldownUntil: 0,
+        superMeter: 0,
         moveSet,
     };
 }
@@ -401,8 +416,8 @@ function applyDamage(
     );
 
     return {
-        target: damagedTarget,
-        attacker,
+        target: { ...damagedTarget, superMeter: Math.min(SUPER_METER_MAX, damagedTarget.superMeter + SUPER_METER_ON_HURT) },
+        attacker: { ...attacker, superMeter: Math.min(SUPER_METER_MAX, attacker.superMeter + SUPER_METER_ON_HIT) },
         wasCounter: false,
     };
 }
@@ -458,7 +473,9 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const animationFrameRef = useRef<number | null>(null);
     const [isReady, setIsReady] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
-    const [hud, setHud] = useState({ p1Hp: 100, p2Hp: 100, winner: null as FighterId | null, elapsed: 0 });
+    const [hud, setHud] = useState({ p1Hp: 100, p2Hp: 100, p1Super: 0, p2Super: 0, winner: null as FighterId | null, elapsed: 0 });
+    const [vsAI, setVsAI] = useState(true);
+    const aiTimerRef = useRef(0);
 
     const assetsRef = useRef<{
         p1: Record<AnimationState, RuntimeSprite>;
@@ -492,7 +509,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         setIsReady(false);
         assetsRef.current = null;
         worldRef.current = null;
-        setHud({ p1Hp: 100, p2Hp: 100, winner: null, elapsed: 0 });
+        setHud({ p1Hp: 100, p2Hp: 100, p1Super: 0, p2Super: 0, winner: null, elapsed: 0 });
         if (animationFrameRef.current !== null) {
             cancelAnimationFrame(animationFrameRef.current);
             animationFrameRef.current = null;
@@ -507,8 +524,9 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             projectiles: [],
             winner: null,
             startedAt: performance.now(),
+            superFreeze: null,
         };
-        setHud({ p1Hp: 100, p2Hp: 100, winner: null, elapsed: 0 });
+        setHud({ p1Hp: 100, p2Hp: 100, p1Super: 0, p2Super: 0, winner: null, elapsed: 0 });
     }, [p1Pick, p2Pick]);
 
     const queueNormalAttack = useCallback((fighterId: FighterId) => {
@@ -607,25 +625,102 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
     const tryJump = useCallback((fighterId: FighterId) => {
         const world = worldRef.current;
-        if (!world) return;
+        if (!world || world.superFreeze) return;
         const now = performance.now();
         const actor = fighterId === "p1" ? world.p1 : world.p2;
         if (world.winner || actor.hp <= 0) return;
         if (actor.y < FLOOR_Y - 1) return;
         if (now < actor.stateLockUntil) return;
-
-        const next = setState(
-            {
-                ...actor,
-                vy: -actor.moveSet.jumpForce,
-            },
-            "jump",
-            now
-        );
-
-        if (fighterId === "p1") world.p1 = next;
-        else world.p2 = next;
+        const next = setState({ ...actor, vy: -actor.moveSet.jumpForce }, "jump", now);
+        if (fighterId === "p1") world.p1 = next; else world.p2 = next;
     }, []);
+
+    const queueSuper = useCallback((fighterId: FighterId) => {
+        const world = worldRef.current;
+        if (!world || world.superFreeze || world.winner) return;
+        const now = performance.now();
+        const actor = fighterId === "p1" ? world.p1 : world.p2;
+        if (actor.hp <= 0 || actor.superMeter < SUPER_METER_MAX) return;
+        if (now < actor.stateLockUntil) return;
+        world.superFreeze = { attacker: fighterId, until: now + SUPER_FREEZE_DURATION, damageAt: now + SUPER_FREEZE_DURATION * 0.7, dealt: false };
+        const next = setState({ ...actor, superMeter: 0, stateLockUntil: now + SUPER_FREEZE_DURATION + 200 }, "attack", now);
+        if (fighterId === "p1") world.p1 = next; else world.p2 = next;
+    }, []);
+
+    const processInput = useCallback((fighterId: FighterId, controls: typeof P1_CONTROLS, key: string) => {
+        const keys = pressedKeysRef.current;
+        if (key === controls.jump) tryJump(fighterId);
+        if (key === controls.attack1 || key === controls.attack2) {
+            const up = keys.has(controls.jump);
+            const down = keys.has(controls.down);
+            if (up) queueSpecial(fighterId, "up");
+            else if (down) queueSpecial(fighterId, "down");
+            else queueNormalAttack(fighterId);
+        }
+        if (key === controls.ranged) queueSpecial(fighterId, "neutral");
+        if (key === controls.super) queueSuper(fighterId);
+    }, [tryJump, queueNormalAttack, queueSpecial, queueSuper]);
+
+    // AI opponent logic
+    const runAI = useCallback((now: number) => {
+        const world = worldRef.current;
+        if (!world || world.winner || world.superFreeze) return;
+        const ai = world.p2; const player = world.p1;
+        if (ai.hp <= 0) return;
+        if (now - aiTimerRef.current < 200 + Math.random() * 200) return;
+        aiTimerRef.current = now;
+        const dist = Math.abs(ai.x - player.x);
+        if (now < ai.stateLockUntil) return;
+        const incoming = world.projectiles.find(p => p.owner === "p1" && Math.abs(p.x - ai.x) < 200);
+        if (incoming && ai.y >= FLOOR_Y - 1) { tryJump("p2"); return; }
+        if (ai.superMeter >= SUPER_METER_MAX && dist < 200) { queueSuper("p2"); return; }
+        if (dist < 150) {
+            const r = Math.random();
+            if (r < 0.45) queueNormalAttack("p2");
+            else if (r < 0.65) queueSpecial("p2", "down");
+            else if (r < 0.8) queueSpecial("p2", "up");
+            else queueSpecial("p2", "neutral");
+            return;
+        }
+        if (dist < 400) { if (Math.random() < 0.4) queueSpecial("p2", "neutral"); else { const d = player.x > ai.x ? P2_CONTROLS.right : P2_CONTROLS.left; pressedKeysRef.current.add(d); setTimeout(() => pressedKeysRef.current.delete(d), 200); } return; }
+        const d = player.x > ai.x ? P2_CONTROLS.right : P2_CONTROLS.left; pressedKeysRef.current.add(d); setTimeout(() => pressedKeysRef.current.delete(d), 300);
+    }, [tryJump, queueNormalAttack, queueSpecial, queueSuper]);
+
+    // Gamepad polling
+    const prevGpRef = useRef<Map<number, boolean[]>>(new Map());
+    const pollGamepads = useCallback(() => {
+        const gps = navigator.getGamepads?.() ?? [];
+        for (let gi = 0; gi < gps.length; gi++) {
+            const gp = gps[gi]; if (!gp) continue;
+            const fid: FighterId = gi === 0 ? "p1" : "p2";
+            if (fid === "p2" && vsAI) continue;
+            const ctrl = fid === "p1" ? P1_CONTROLS : P2_CONTROLS;
+            const prev = prevGpRef.current.get(gi) ?? []; const curr = gp.buttons.map(b => b.pressed);
+            const jp = (i: number) => curr[i] && !prev[i];
+            const lx = gp.axes[0] ?? 0; const ly = gp.axes[1] ?? 0;
+            if (lx < -0.3 || gp.buttons[14]?.pressed) pressedKeysRef.current.add(ctrl.left); else pressedKeysRef.current.delete(ctrl.left);
+            if (lx > 0.3 || gp.buttons[15]?.pressed) pressedKeysRef.current.add(ctrl.right); else pressedKeysRef.current.delete(ctrl.right);
+            if (ly < -0.5 || gp.buttons[12]?.pressed) pressedKeysRef.current.add(ctrl.jump); else pressedKeysRef.current.delete(ctrl.jump);
+            if (ly > 0.5 || gp.buttons[13]?.pressed) pressedKeysRef.current.add(ctrl.down); else pressedKeysRef.current.delete(ctrl.down);
+            if (jp(3)) tryJump(fid);
+            if (jp(0) || jp(2)) { const u = pressedKeysRef.current.has(ctrl.jump); const d = pressedKeysRef.current.has(ctrl.down); if (u) queueSpecial(fid, "up"); else if (d) queueSpecial(fid, "down"); else queueNormalAttack(fid); }
+            if (jp(1)) queueSpecial(fid, "neutral");
+            if (jp(5)) queueSuper(fid);
+            prevGpRef.current.set(gi, curr);
+        }
+    }, [vsAI, tryJump, queueNormalAttack, queueSpecial, queueSuper]);
+
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            const key = e.key.toLowerCase(); pressedKeysRef.current.add(key);
+            if (e.repeat) return;
+            processInput("p1", P1_CONTROLS, key);
+            if (!vsAI) processInput("p2", P2_CONTROLS, key);
+        };
+        const onKeyUp = (e: KeyboardEvent) => pressedKeysRef.current.delete(e.key.toLowerCase());
+        window.addEventListener("keydown", onKeyDown); window.addEventListener("keyup", onKeyUp);
+        return () => { window.removeEventListener("keydown", onKeyDown); window.removeEventListener("keyup", onKeyUp); pressedKeysRef.current.clear(); };
+    }, [processInput, vsAI]);
 
     useEffect(() => {
         if (selectPhase !== "fight" || !p1Pick || !p2Pick) return;
@@ -637,6 +732,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             projectiles: [],
             winner: null,
             startedAt: performance.now(),
+            superFreeze: null,
         };
 
         const maybeLoad = (src?: string) => src ? loadImage(src).catch(() => null) : Promise.resolve(null);
@@ -921,6 +1017,59 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 ctx.restore();
             }
 
+            // Super meter bars
+            const drawMeter = (x: number, meter: number, color: string) => {
+                ctx.fillStyle = "rgba(0,0,0,0.6)";
+                ctx.fillRect(x, FLOOR_Y + 20, 200, 12);
+                ctx.fillStyle = meter >= SUPER_METER_MAX ? "#ffd700" : color;
+                ctx.fillRect(x + 1, FLOOR_Y + 21, (meter / SUPER_METER_MAX) * 198, 10);
+                if (meter >= SUPER_METER_MAX) {
+                    ctx.save();
+                    ctx.globalAlpha = 0.4 + 0.3 * Math.sin(now / 100);
+                    ctx.fillStyle = "#fff";
+                    ctx.fillRect(x + 1, FLOOR_Y + 21, 198, 10);
+                    ctx.restore();
+                    ctx.fillStyle = "#ffd700"; ctx.font = "bold 11px monospace";
+                    ctx.fillText("R  SUPER", x + 60, FLOOR_Y + 30);
+                }
+            };
+            drawMeter(40, world.p1.superMeter, "#4ade80");
+            drawMeter(ARENA_WIDTH - 240, world.p2.superMeter, "#60a5fa");
+
+            // Super freeze cutscene overlay
+            if (world.superFreeze && now < world.superFreeze.until) {
+                const progress = (now - (world.superFreeze.until - SUPER_FREEZE_DURATION)) / SUPER_FREEZE_DURATION;
+                ctx.save();
+                // Darken + zoom lines
+                ctx.globalAlpha = 0.5;
+                ctx.fillStyle = "#000";
+                ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
+                // Radial burst lines
+                ctx.globalAlpha = 0.3 + 0.3 * Math.sin(now / 30);
+                const attacker = world.superFreeze.attacker === "p1" ? world.p1 : world.p2;
+                ctx.strokeStyle = "#ffd700";
+                ctx.lineWidth = 2;
+                for (let i = 0; i < 24; i++) {
+                    const angle = (i / 24) * Math.PI * 2 + now / 200;
+                    ctx.beginPath();
+                    ctx.moveTo(attacker.x + Math.cos(angle) * 40, (attacker.y - attacker.height * 0.5) + Math.sin(angle) * 40);
+                    ctx.lineTo(attacker.x + Math.cos(angle) * (200 + progress * 400), (attacker.y - attacker.height * 0.5) + Math.sin(angle) * (200 + progress * 400));
+                    ctx.stroke();
+                }
+                // Super name text
+                ctx.globalAlpha = Math.min(1, progress * 3);
+                ctx.fillStyle = "#ffd700";
+                ctx.font = "bold 48px serif";
+                ctx.textAlign = "center";
+                const name = (world.superFreeze.attacker === "p1" ? p1Pick : p2Pick)?.moveSet.superName ?? "SUPER";
+                ctx.fillText(name, ARENA_WIDTH / 2, ARENA_HEIGHT / 2 - 30);
+                ctx.font = "24px serif";
+                ctx.fillStyle = "#fff";
+                ctx.fillText((world.superFreeze.attacker === "p1" ? p1Pick : p2Pick)?.name ?? "", ARENA_WIDTH / 2, ARENA_HEIGHT / 2 + 20);
+                ctx.textAlign = "left";
+                ctx.restore();
+            }
+
             ctx.restore(); // end screen shake
         };
 
@@ -1029,7 +1178,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             const result = applyDamage(defender, attacker, attacker.moveSet.baseDamage, now);
 
             // Spawn attack effect sprite at the hit point
-            const effectImg = attacker.id === "p1" ? assets.p1Effect : assets.p2Effect;
+            const fxAssets = assetsRef.current;
+            const effectImg = fxAssets ? (attacker.id === "p1" ? fxAssets.p1Effect : fxAssets.p2Effect) : null;
             const effectDef = attacker.id === "p1" ? p1Pick?.attackEffect : p2Pick?.attackEffect;
             if (effectImg && effectDef) {
                 spawnEffect(effectImg, effectDef.frames, effectDef.hold,
@@ -1051,6 +1201,31 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             if (!assets) return;
 
             let world = worldRef.current;
+
+            // Process super freeze
+            if (world.superFreeze) {
+                if (now >= world.superFreeze.damageAt && !world.superFreeze.dealt) {
+                    world.superFreeze.dealt = true;
+                    const atkId = world.superFreeze.attacker;
+                    const atk = atkId === "p1" ? world.p1 : world.p2;
+                    const def = atkId === "p1" ? world.p2 : world.p1;
+                    const result = applyDamage(def, atk, atk.moveSet.superDamage, now);
+                    if (atkId === "p1") { world.p1 = result.attacker; world.p2 = result.target; }
+                    else { world.p2 = result.attacker; world.p1 = result.target; }
+                    const fxA = assetsRef.current;
+                    const fxImg = fxA ? (atkId === "p1" ? fxA.p1Effect : fxA.p2Effect) : null;
+                    const fxDef = atkId === "p1" ? p1Pick?.attackEffect : p2Pick?.attackEffect;
+                    if (fxImg && fxDef) spawnEffect(fxImg, fxDef.frames, fxDef.hold, def.x, def.y - def.height * 0.5, atk.facing < 0);
+                    triggerScreenShake(18, 400);
+                    triggerHitFlash(def.id as FighterId, 200);
+                }
+                if (now >= world.superFreeze.until) {
+                    world.superFreeze = null;
+                }
+                worldRef.current = world;
+                draw(world);
+                return;
+            }
 
             let nextP1 = updateMovement(world.p1, world.p2, P1_CONTROLS, now);
             let nextP2 = updateMovement(world.p2, world.p1, P2_CONTROLS, now);
@@ -1164,6 +1339,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 return {
                     p1Hp: world.p1.hp,
                     p2Hp: world.p2.hp,
+                    p1Super: world.p1.superMeter,
+                    p2Super: world.p2.superMeter,
                     winner: world.winner,
                     elapsed,
                 };
@@ -1175,6 +1352,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         const loop = (now: number) => {
             if (now - previousTime > 13) {
                 previousTime = now;
+                if (vsAI) runAI(now);
+                pollGamepads();
                 updateWorld(now);
             }
             animationFrameRef.current = requestAnimationFrame(loop);
@@ -1259,6 +1438,9 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                         <Badge variant="outline" className="border-white/30 text-white/90">Match Time {formatTime(hud.elapsed)}</Badge>
                     </div>
                     <div className="flex gap-2">
+                        <Button onClick={() => setVsAI(!vsAI)} variant="outline" className={vsAI ? "border-amber-400/40 text-amber-300" : "border-white/20 text-white/70"}>
+                            {vsAI ? "vs AI" : "vs P2"}
+                        </Button>
                         <Button onClick={resetMatch} variant="secondary">Rematch</Button>
                         <Button onClick={resetToSelect} variant="outline" className="border-white/20 text-white/70">New Fighters</Button>
                     </div>
@@ -1312,24 +1494,29 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                             <Crosshair className="w-4 h-4" /> P1: {p1Pick?.name}
                         </div>
                         <div className="text-sm text-white/80 space-y-1">
-                            <div>A / D: move, W: jump</div>
-                            <div>Q: {p1Pick?.moveSet.normalName}</div>
-                            <div>E: {p1Pick?.moveSet.neutralSpecialName}</div>
-                            <div>W+E: {p1Pick?.moveSet.upSpecialName}</div>
-                            <div>S+E: {p1Pick?.moveSet.downSpecialName}</div>
+                            <div>A/D: move · W: jump</div>
+                            <div>Q or E: melee attack</div>
+                            <div>F: ranged ({p1Pick?.moveSet.neutralSpecialName})</div>
+                            <div>W+Q/E: {p1Pick?.moveSet.upSpecialName}</div>
+                            <div>S+Q/E: {p1Pick?.moveSet.downSpecialName}</div>
+                            <div className="text-amber-300">R: {p1Pick?.moveSet.superName} (when meter full)</div>
+                            <div className="text-white/50 mt-1">Gamepad: A=attack B=ranged X=attack Y=jump RB=super</div>
                         </div>
                     </Card>
                     <Card className="p-4 bg-slate-900/70 border-sky-400/20">
                         <div className="font-semibold mb-2 flex items-center gap-2 text-sky-300">
-                            <Zap className="w-4 h-4" /> P2: {p2Pick?.name}
+                            <Zap className="w-4 h-4" /> P2: {p2Pick?.name} {vsAI && <Badge className="ml-1 bg-amber-500/20 text-amber-300 text-xs">AI</Badge>}
                         </div>
-                        <div className="text-sm text-white/80 space-y-1">
-                            <div>Arrow keys: move + jump</div>
-                            <div>/: {p2Pick?.moveSet.normalName}</div>
-                            <div>.: {p2Pick?.moveSet.neutralSpecialName}</div>
-                            <div>Up+.: {p2Pick?.moveSet.upSpecialName}</div>
-                            <div>Down+.: {p2Pick?.moveSet.downSpecialName}</div>
-                        </div>
+                        {vsAI ? (
+                            <div className="text-sm text-white/60">AI-controlled opponent. Toggle "vs P2" for local 2-player.</div>
+                        ) : (
+                            <div className="text-sm text-white/80 space-y-1">
+                                <div>Arrows: move + jump</div>
+                                <div>/ or .: melee attack</div>
+                                <div>;: ranged · ': super</div>
+                                <div>Gamepad 2: same button layout</div>
+                            </div>
+                        )}
                     </Card>
                 </div>
             </div>
