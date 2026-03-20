@@ -1,6 +1,6 @@
 # Grudge Fighter
 
-A 2D sprite-based fighting game with 38 playable characters, AI opponents, online PvP, a stamina system, and Smash Bros-style super attacks.
+A 2D sprite-based fighting game with 39 playable characters, AI opponents, online PvP, a stamina system, and Smash Bros-style super attacks.
 
 **Play Now:** [grudge-rpg-sprite-attack.vercel.app](https://grudge-rpg-sprite-attack-grudgenexus.vercel.app)
 **Landing Page:** [molochdagod.github.io/Grudge-RPG-Sprite-Attack](https://molochdagod.github.io/Grudge-RPG-Sprite-Attack)
@@ -9,8 +9,8 @@ A 2D sprite-based fighting game with 38 playable characters, AI opponents, onlin
 
 ## Features
 
-### 38 Playable Characters
-Knight, Archer, Wizard, Orc, Dark Knight, Fire Knight, Elf Ranger, Elf Mage, Barbarian, Necromancer, Pirate Captain, Gunslinger, Shadow Warrior, Fire Wizard, Lightning Mage, Crossbowman, Werebear, Werewolf, Arcane Archer, Leaf Ranger, Martial Hero, Free Knight, Nightborne, Wind Hashashin, Water Priestess, Shardsoul Slayer, Loreon Knight, Elite Orc, Evil Wizard, and more. Each with unique sprites from GRUDA Wars, attack effects, projectiles, and super attacks.
+### 39 playable characters
+Knight, Archer, Wizard, Orc, Dark Knight, Fire Knight, Elf Ranger, Elf Mage, Barbarian, Necromancer, Pirate Captain, Gunslinger, Shadow Warrior, Fire Wizard, Lightning Mage, Crossbowman, Werebear, Werewolf, Arcane Archer, Leaf Ranger, Martial Hero, Dwarf Mage, Nightborne, Wind Hashashin, Water Priestess, Shardsoul Slayer, Loreon Knight, Elite Orc, Evil Wizard, Wanderer Magician, and more. Each with unique sprites from GRUDA Wars, attack effects, projectiles, and super attacks.
 
 ### Combat System
 - **Melee** (Q/E) — free basic attacks
@@ -62,7 +62,7 @@ Full admin tool at `#toonadmin` for editing all 38 characters:
 - **PvP Server** — Node.js + Socket.io on Railway
 - **Backend** — Express, PostgreSQL (Drizzle ORM), Grudge Studio backend
 - **Deployment** — Vercel (frontend), Railway (PvP), Docker (fullstack)
-- **Assets** — GRUDA Wars sprite sheets (48–200px frames, scaled to 300px)
+- **Assets** — Zerie Tiny RPG (2x scale), CraftPix Wizard + RPG Heroes, GRUDA Wars (48–200px frames, scaled to 300px)
 
 ## Quick Start
 
@@ -84,7 +84,7 @@ client/
     lib/grudaRoster.ts           # 38-character roster data
     lib/charConfig.ts            # Character config persistence
   public/fighter2d/
-    characters/                  # 38 character sprite folders
+    characters/                  # 39 character sprite folders
     effects/                     # Attack effect sprite strips
     projectiles/                 # Arrow, fireball, bullet, axe sprites
 server/
