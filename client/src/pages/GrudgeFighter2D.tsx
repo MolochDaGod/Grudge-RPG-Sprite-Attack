@@ -70,6 +70,8 @@ interface FighterRuntime {
     counterUntil: number;
     specialCooldownUntil: number;
     superMeter: number;
+    stamina: number;
+    lastStaminaRegen: number;
     moveSet: CharacterMoveSet;
 }
 
@@ -130,6 +132,15 @@ const SUPER_METER_ON_HIT = 12;
 const SUPER_METER_ON_HURT = 8;
 const SUPER_FREEZE_DURATION = 800;
 const SUPER_DAMAGE_MULTIPLIER = 3;
+
+// Stamina system — resource bar for dash, ranged, specials
+const STAMINA_MAX = 3;
+const STAMINA_REGEN_MS = 3000; // 1 point every 3 seconds
+const STAMINA_COST_DASH = 3;   // full 3 for max half-screen lunge
+const STAMINA_COST_RANGED = 1;
+const STAMINA_COST_SPECIAL = 2;
+const EXHAUSTION_PENALTY_MS = 300; // lockout when spamming at 0 stamina
+const DASH_VX_PER_POINT = 7;      // velocity per stamina point spent
 
 // ─── Character Roster (GrudgeRPG 100x100 sprites) ───────────────────────
 
@@ -334,6 +345,8 @@ function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet): Fighter
         counterUntil: 0,
         specialCooldownUntil: 0,
         superMeter: 0,
+        stamina: STAMINA_MAX,
+        lastStaminaRegen: performance.now(),
         moveSet,
     };
 }
@@ -587,7 +600,13 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         if (world.winner || actor.hp <= 0) return;
         if (now < actor.stateLockUntil || now < actor.specialCooldownUntil) return;
 
+        // Ranged costs 1 stamina
         if (kind === "neutral") {
+            if (actor.stamina < STAMINA_COST_RANGED) {
+                const exhausted = { ...actor, stateLockUntil: now + EXHAUSTION_PENALTY_MS };
+                if (fighterId === "p1") world.p1 = exhausted; else world.p2 = exhausted;
+                return;
+            }
             const projectile: Projectile = {
                 id: `${fighterId}-${now}`,
                 owner: fighterId,
@@ -602,6 +621,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             const next = setState(
                 {
                     ...actor,
+                    stamina: actor.stamina - STAMINA_COST_RANGED,
                     stateLockUntil: now + 300,
                     specialCooldownUntil: now + 800,
                     attackHasConnected: false,
@@ -617,10 +637,18 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             return;
         }
 
+        // Up/Down specials cost 2 stamina
+        if (actor.stamina < STAMINA_COST_SPECIAL) {
+            const exhausted = { ...actor, stateLockUntil: now + EXHAUSTION_PENALTY_MS };
+            if (fighterId === "p1") world.p1 = exhausted; else world.p2 = exhausted;
+            return;
+        }
+
         if (kind === "up") {
             const next = setState(
                 {
                     ...actor,
+                    stamina: actor.stamina - STAMINA_COST_SPECIAL,
                     vy: -actor.moveSet.jumpForce * 0.95,
                     vx: actor.facing * 8,
                     stateLockUntil: now + 340,
@@ -637,6 +665,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         const next = setState(
             {
                 ...actor,
+                stamina: actor.stamina - STAMINA_COST_SPECIAL,
                 stateLockUntil: now + 360,
                 specialCooldownUntil: now + 1200,
                 counterUntil: now + 420,
@@ -672,7 +701,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         if (fighterId === "p1") world.p1 = next; else world.p2 = next;
     }, []);
 
-    // LMB: Dash Attack — lunge forward + melee hit
+    // LMB: Dash Attack — spends up to 3 stamina for proportional lunge
     const queueDashAttack = useCallback((fighterId: FighterId) => {
         const world = worldRef.current;
         if (!world || world.superFreeze) return;
@@ -681,10 +710,22 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         if (world.winner || actor.hp <= 0) return;
         if (now < actor.stateLockUntil) return;
 
+        // Exhaustion: if 0 stamina, apply penalty and block attack
+        if (actor.stamina <= 0) {
+            const exhausted = { ...actor, stateLockUntil: now + EXHAUSTION_PENALTY_MS };
+            if (fighterId === "p1") world.p1 = exhausted; else world.p2 = exhausted;
+            return;
+        }
+
+        // Spend up to 3 stamina, always try max
+        const spend = Math.min(actor.stamina, STAMINA_COST_DASH);
+        const dashVx = actor.facing * spend * DASH_VX_PER_POINT;
+
         const next = setState(
             {
                 ...actor,
-                vx: actor.facing * 12,
+                vx: dashVx,
+                stamina: actor.stamina - spend,
                 stateLockUntil: now + 350,
                 attackHasConnected: false,
             },
@@ -1126,6 +1167,24 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             drawMeter(40, world.p1.superMeter, "#4ade80");
             drawMeter(ARENA_WIDTH - 240, world.p2.superMeter, "#60a5fa");
 
+            // Stamina pips (under super meter)
+            const drawStamina = (x: number, stamina: number) => {
+                for (let i = 0; i < STAMINA_MAX; i++) {
+                    const px = x + i * 28;
+                    ctx.fillStyle = i < stamina ? "#38bdf8" : "rgba(255,255,255,0.1)";
+                    ctx.fillRect(px, FLOOR_Y + 36, 24, 8);
+                    if (i < stamina) {
+                        ctx.fillStyle = "rgba(255,255,255,0.3)";
+                        ctx.fillRect(px, FLOOR_Y + 36, 24, 3);
+                    }
+                }
+                ctx.fillStyle = "rgba(255,255,255,0.4)";
+                ctx.font = "9px monospace";
+                ctx.fillText("STAMINA", x, FLOOR_Y + 55);
+            };
+            drawStamina(40, world.p1.stamina);
+            drawStamina(ARENA_WIDTH - 240, world.p2.stamina);
+
             // Super freeze cutscene overlay
             if (world.superFreeze && now < world.superFreeze.until) {
                 const progress = (now - (world.superFreeze.until - SUPER_FREEZE_DURATION)) / SUPER_FREEZE_DURATION;
@@ -1317,6 +1376,16 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 return;
             }
 
+            // Stamina regen: +1 every 3 seconds
+            const regenFighter = (f: FighterRuntime): FighterRuntime => {
+                if (f.stamina >= STAMINA_MAX) return { ...f, lastStaminaRegen: now };
+                if (now - f.lastStaminaRegen >= STAMINA_REGEN_MS) {
+                    return { ...f, stamina: Math.min(STAMINA_MAX, f.stamina + 1), lastStaminaRegen: now };
+                }
+                return f;
+            };
+            world = { ...world, p1: regenFighter(world.p1), p2: regenFighter(world.p2) };
+
             let nextP1 = updateMovement(world.p1, world.p2, P1_CONTROLS, now);
             let nextP2 = updateMovement(world.p2, world.p1, P2_CONTROLS, now);
 
@@ -1477,9 +1546,6 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     <div className="space-y-4">
                         <Button onClick={() => { setVsAI(true); setSelectPhase("p1"); }} className="w-full h-16 text-lg bg-emerald-600 hover:bg-emerald-500">
                             <Shield className="w-5 h-5 mr-3" /> vs AI
-                        </Button>
-                        <Button onClick={() => { setVsAI(false); setSelectPhase("p1"); }} className="w-full h-16 text-lg bg-blue-600 hover:bg-blue-500">
-                            <Zap className="w-5 h-5 mr-3" /> Local 2-Player
                         </Button>
                         <Button onClick={() => { pvp.connect(); setSelectPhase("lobby"); }} className="w-full h-16 text-lg bg-purple-600 hover:bg-purple-500">
                             <Globe className="w-5 h-5 mr-3" /> Online PvP
