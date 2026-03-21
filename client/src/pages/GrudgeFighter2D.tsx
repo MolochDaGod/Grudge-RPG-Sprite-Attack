@@ -2077,83 +2077,110 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         postMatchResult(winner, loser, winChar, loseChar, formatTime(hud.elapsed), isOnline);
     }, [hud.winner]);
 
+    // Pick 2 random characters for the demo battle sprites on menu
+    const [demoP1] = useState(() => CHARACTER_ROSTER[Math.floor(Math.random() * CHARACTER_ROSTER.length)]);
+    const [demoP2] = useState(() => CHARACTER_ROSTER[Math.floor(Math.random() * CHARACTER_ROSTER.length)]);
+
     // ─── MODE SELECT ─────────────────────────────────────────────
     if (selectPhase === "mode") {
         return (
-            <div className="min-h-screen text-white relative overflow-hidden" style={{
-                background: 'radial-gradient(ellipse at center bottom, rgba(139,0,0,0.15) 0%, transparent 60%), #000',
-            }}>
-                {/* Background image */}
-                <div className="absolute inset-0 opacity-10" style={{
-                    backgroundImage: 'url(/favicon.png)',
-                    backgroundSize: '300px',
-                    backgroundPosition: 'center 30%',
-                    backgroundRepeat: 'no-repeat',
-                    filter: 'blur(1px)',
+            <div className="min-h-screen text-white relative overflow-hidden" style={{ background: '#000' }}>
+                {/* Dark vignette overlay */}
+                <div className="absolute inset-0" style={{
+                    background: 'radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.8) 100%)',
                 }} />
 
-                <div className="relative z-10 max-w-[500px] mx-auto pt-16 px-6">
+                {/* Animated battle sprites in background */}
+                <div className="absolute inset-0 flex items-center justify-center opacity-20 pointer-events-none">
+                    <div className="relative" style={{ width: 800, height: 400 }}>
+                        {/* P1 sprite - left side, facing right */}
+                        <img src={demoP1.sprites.attack.src} alt="" className="absolute" style={{
+                            left: 80, bottom: 40, height: 200, imageRendering: 'pixelated', filter: 'drop-shadow(0 0 20px rgba(185,28,28,0.5))',
+                        }} />
+                        {/* VS spark */}
+                        <div className="absolute text-6xl font-black" style={{
+                            left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
+                            color: '#b91c1c', textShadow: '0 0 40px rgba(185,28,28,0.8)', fontFamily: 'Georgia, serif',
+                        }}>VS</div>
+                        {/* P2 sprite - right side, facing left, flipped */}
+                        <img src={demoP2.sprites.attack.src} alt="" className="absolute" style={{
+                            right: 80, bottom: 40, height: 200, imageRendering: 'pixelated', transform: 'scaleX(-1)',
+                            filter: 'drop-shadow(0 0 20px rgba(109,40,217,0.5))',
+                        }} />
+                    </div>
+                </div>
+
+                <div className="relative z-10 max-w-[520px] mx-auto pt-12 px-6 pb-8">
                     {/* Logo + Title */}
-                    <div className="text-center mb-10">
-                        <img src="/favicon.png" alt="Grudge" className="w-24 h-24 mx-auto mb-4 rounded-full" style={{
+                    <div className="text-center mb-8">
+                        <img src="/favicon.png" alt="Grudge" className="w-20 h-20 mx-auto mb-3 rounded-full" style={{
                             border: '2px solid rgba(185,28,28,0.5)',
                             boxShadow: '0 0 40px rgba(185,28,28,0.3)',
                         }} />
                         <h1 className="text-4xl font-black tracking-wider" style={{
                             fontFamily: 'Georgia, serif',
                             background: 'linear-gradient(180deg, #fff 0%, #b91c1c 100%)',
-                            WebkitBackgroundClip: 'text',
-                            WebkitTextFillColor: 'transparent',
+                            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
                             filter: 'drop-shadow(0 0 20px rgba(185,28,28,0.4))',
                         }}>GRUDGE FIGHTER</h1>
-                        <p className="text-white/30 text-sm mt-1 tracking-[0.3em] uppercase">39 Warriors · No Mercy</p>
+                        <p className="text-white/25 text-xs mt-1 tracking-[0.4em] uppercase">39 Warriors · No Mercy</p>
+                        <p className="text-white/15 text-[10px] mt-0.5">{demoP1.name} vs {demoP2.name}</p>
                     </div>
 
-                    {/* Main Buttons */}
+                    {/* Main action buttons with sprite thumbnails */}
                     <div className="space-y-3">
                         <button onClick={() => { setVsAI(true); setSelectPhase("p1"); }}
-                            className="w-full py-4 rounded-lg font-bold text-lg tracking-wider transition-all hover:scale-[1.02] hover:shadow-lg"
-                            style={{ background: 'linear-gradient(135deg, #b91c1c, #7f1d1d)', boxShadow: '0 4px 20px rgba(185,28,28,0.3)' }}>
-                            ⚔️ &nbsp; VS AI
+                            className="w-full flex items-center gap-4 py-3 px-5 rounded-lg font-bold text-lg tracking-wider transition-all hover:scale-[1.02]"
+                            style={{ background: 'linear-gradient(135deg, #b91c1c, #7f1d1d)', boxShadow: '0 4px 24px rgba(185,28,28,0.35)' }}>
+                            <img src={demoP1.sprites.idle.src} alt="" className="w-10 h-10 object-contain" style={{ imageRendering: 'pixelated' }} />
+                            <span>VS AI</span>
                         </button>
                         <button onClick={() => { pvp.connect(); setSelectPhase("lobby"); }}
-                            className="w-full py-4 rounded-lg font-bold text-lg tracking-wider transition-all hover:scale-[1.02]"
-                            style={{ background: 'linear-gradient(135deg, #6d28d9, #4c1d95)', boxShadow: '0 4px 20px rgba(109,40,217,0.3)' }}>
-                            🌐 &nbsp; ONLINE PVP
+                            className="w-full flex items-center gap-4 py-3 px-5 rounded-lg font-bold text-lg tracking-wider transition-all hover:scale-[1.02]"
+                            style={{ background: 'linear-gradient(135deg, #6d28d9, #4c1d95)', boxShadow: '0 4px 24px rgba(109,40,217,0.35)' }}>
+                            <img src={demoP2.sprites.idle.src} alt="" className="w-10 h-10 object-contain" style={{ imageRendering: 'pixelated' }} />
+                            <span>ONLINE PVP</span>
                         </button>
                     </div>
 
-                    {/* Secondary row */}
-                    <div className="grid grid-cols-2 gap-3 mt-4">
+                    {/* Tools row */}
+                    <div className="grid grid-cols-2 gap-2 mt-4">
                         <button onClick={() => { window.location.hash = 'toonadmin'; }}
-                            className="py-3 rounded-lg text-sm font-semibold border border-white/10 bg-white/5 hover:bg-white/10 transition-all">
-                            🎨 Character Editor
+                            className="flex items-center gap-2 justify-center py-2.5 rounded-lg text-sm font-semibold border border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10 transition-all text-amber-300">
+                            <img src="/fighter2d/effects/slash_arc.png" alt="" className="w-5 h-5 object-contain" style={{ imageRendering: 'pixelated' }} />
+                            Character Editor
                         </button>
                         <a href="https://molochdagod.github.io/Grudge-RPG-Sprite-Attack/" target="_blank"
-                            className="py-3 rounded-lg text-sm font-semibold border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-center block">
-                            🏠 Landing Page
+                            className="flex items-center gap-2 justify-center py-2.5 rounded-lg text-sm font-semibold border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-center">
+                            <img src="/favicon.png" alt="" className="w-5 h-5 rounded-full" />
+                            Landing Page
                         </a>
                     </div>
 
-                    {/* Tertiary row */}
-                    <div className="grid grid-cols-3 gap-2 mt-3">
+                    {/* Links row */}
+                    <div className="grid grid-cols-4 gap-1.5 mt-3">
                         <a href="https://molochdagod.github.io/Grudge-RPG-Sprite-Attack/serverconnect.html" target="_blank"
-                            className="py-2.5 rounded text-xs font-medium text-white/40 border border-white/5 bg-white/[0.02] hover:bg-white/5 text-center block">
-                            🔧 Servers
-                        </a>
+                            className="py-2 rounded text-[10px] font-medium text-white/35 border border-white/5 hover:bg-white/5 text-center">Servers</a>
                         <a href="https://discord.gg/grudge" target="_blank"
-                            className="py-2.5 rounded text-xs font-medium text-[#7289da] border border-[#7289da]/20 bg-[#7289da]/5 hover:bg-[#7289da]/10 text-center block">
-                            💬 Discord
-                        </a>
+                            className="py-2 rounded text-[10px] font-medium text-[#7289da] border border-[#7289da]/15 hover:bg-[#7289da]/10 text-center">Discord</a>
                         <a href="https://github.com/MolochDaGod/Grudge-RPG-Sprite-Attack" target="_blank"
-                            className="py-2.5 rounded text-xs font-medium text-white/40 border border-white/5 bg-white/[0.02] hover:bg-white/5 text-center block">
-                            ⭐ GitHub
-                        </a>
+                            className="py-2 rounded text-[10px] font-medium text-white/35 border border-white/5 hover:bg-white/5 text-center">GitHub</a>
+                        <a href="https://grudge-studio.com" target="_blank"
+                            className="py-2 rounded text-[10px] font-medium text-red-400/60 border border-red-500/10 hover:bg-red-500/5 text-center">About Us</a>
                     </div>
 
-                    {/* Version info */}
-                    <div className="text-center mt-8 text-white/15 text-[10px] tracking-widest uppercase">
-                        39 Fighters · 4 Stages · Grudge Studio
+                    {/* Footer: legal + credits */}
+                    <div className="mt-6 pt-4 border-t border-white/5">
+                        <div className="flex justify-center gap-4 text-[9px] text-white/20">
+                            <a href="https://grudge-studio.com/privacy" target="_blank" className="hover:text-white/40">Privacy Policy</a>
+                            <span>·</span>
+                            <a href="https://grudge-studio.com/tos" target="_blank" className="hover:text-white/40">Terms of Service</a>
+                            <span>·</span>
+                            <button onClick={() => alert('GRUDGE FIGHTER\n\nCreated by Grudge Studio\nBy Racalvin The Pirate King\n\n39 Fighters \u00b7 4 Stages \u00b7 Online PvP\n\nSprites: Zerie Tiny RPG, CraftPix Wizard & RPG Heroes, GRUDA Wars\nEngine: React + Canvas 2D + Socket.io\nBackend: Railway + Vercel\n\ngrudge-studio.com')} className="hover:text-white/40">Credits</button>
+                        </div>
+                        <div className="text-center mt-2 text-[8px] text-white/10 tracking-widest uppercase">
+                            Grudge Studio · By Racalvin The Pirate King
+                        </div>
                     </div>
                 </div>
             </div>
