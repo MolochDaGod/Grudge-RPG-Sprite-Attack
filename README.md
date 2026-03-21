@@ -1,6 +1,6 @@
-# Grudge Fighter
+# Grudge Smash
 
-A 2D sprite-based fighting game with 39 playable characters, AI opponents, online PvP, a stamina system, and Smash Bros-style super attacks.
+A 2D sprite-based fighting game with 39 playable characters, AI opponents, online PvP, a stamina system, startup cinematic intro, and Smash Bros-style super attacks.
 
 **Play Now:** [grudge-rpg-sprite-attack.vercel.app](https://grudge-rpg-sprite-attack-grudgenexus.vercel.app)
 **Landing Page:** [molochdagod.github.io/Grudge-RPG-Sprite-Attack](https://molochdagod.github.io/Grudge-RPG-Sprite-Attack)
@@ -15,11 +15,16 @@ Knight, Archer, Wizard, Orc, Dark Knight, Fire Knight, Elf Ranger, Elf Mage, Bar
 ### Combat System
 - **Melee** (Q/E) — free basic attacks
 - **Dash Attack** (LMB) — lunge forward, distance scales with stamina (up to half-screen)
+- **Dodge Roll** (AA / DD) — double-tap movement for invulnerable dodge with quick reposition
 - **Block / Parry** (RMB) — counter stance that reflects damage
 - **Ranged** (F) — character-specific projectiles with sprite animations
 - **Up Special** (W+Q/E) — aerial dash strike
 - **Down Special** (S+Q/E) — counter stance
 - **Super Attack** (R) — Smash Bros-style cutscene when meter is full
+
+### Startup + Landing Presentation
+- Startup intro video auto-plays from `client/public/startup-intro.mp4` with a skip button.
+- Landing hero background loads from `client/public/landing-bg.jpg`.
 
 ### Stamina System
 3-pip resource bar that regens 1 point every 3 seconds:
@@ -46,6 +51,7 @@ Socket.io room-based matchmaking with 4-character room codes. Input relay archit
 - Keyboard (full rebindable P1/P2 layouts)
 - Mouse (LMB = dash, RMB = block)
 - Gamepad (A/X=attack, B=ranged, Y=jump, RT=dash, LT=block, RB=super)
+- Double-tap movement dodge: `AA` (left) and `DD` (right)
 
 ### ToonAdmin — Character Editor
 Full admin tool at `#toonadmin` for editing all 38 characters:
@@ -87,6 +93,8 @@ client/
     characters/                  # 39 character sprite folders
     effects/                     # Attack effect sprite strips
     projectiles/                 # Arrow, fireball, bullet, axe sprites
+  public/startup-intro.mp4       # Startup cinematic
+  public/landing-bg.jpg          # Landing page hero background
 server/
   pvp.ts                         # Socket.io PvP room server
   index.ts                       # Express entry point
@@ -105,6 +113,7 @@ docs/
 | Jump | W | — | Y |
 | Melee Attack | Q or E | — | A or X |
 | Dash Attack | — | LMB | RT |
+| Dodge Roll | Double-tap A/D (AA or DD) | — | Double-tap Left/Right |
 | Block / Parry | — | RMB | LT |
 | Ranged | F | — | B |
 | Up Special | W + Q/E | — | Up + A |
