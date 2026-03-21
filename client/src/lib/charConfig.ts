@@ -26,6 +26,8 @@ export interface ActionOverride {
   frames: number;    // frame count
   hold: number;      // ticks per frame (lower = faster)
   loop: boolean;     // loop or play once
+  hitVfx?: string;   // VFX ID to play on hit impact (e.g. "hit_effect_1")
+  swingVfx?: string; // VFX ID to play during attack swing (e.g. "smearH1")
 }
 
 // Full override config for a character

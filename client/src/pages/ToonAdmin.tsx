@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GRUDA_ROSTER, type GrudaCharDef } from "@/lib/grudaRoster";
 import { ACTION_SLOTS, type ActionSlotKey, type ActionOverride, type CharOverrides, loadOverrides, setCharOverrides, deleteCharOverrides, exportAllOverrides, importOverrides } from "@/lib/charConfig";
+import { ALL_VFX, preloadVfx, type VfxDef } from "@/lib/vfxLibrary";
 
 // Get all animation files for a character
 function getCharAnims(char: GrudaCharDef): { key: string; file: string; frames: number }[] {
@@ -358,6 +359,58 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
               </div>
             );
           })}
+
+          {/* VFX Assignment */}
+          <div className="p-3 border-t border-white/10">
+            <div className="text-xs text-white/30 uppercase tracking-widest mb-2">Hit VFX</div>
+            <p className="text-[9px] text-white/20 mb-2">Assign visual effects to attack actions</p>
+            {ACTION_SLOTS.filter(s => ["attack","attack2","block","cast","special"].includes(s.key)).map(slot => {
+              const current = charOverride.actions[slot.key];
+              return (
+                <div key={`vfx-${slot.key}`} className="mb-2">
+                  <div className="text-[10px] text-white/50 mb-0.5">{slot.label}</div>
+                  <div className="flex gap-1">
+                    <select
+                      value={current?.hitVfx ?? ""}
+                      onChange={e => {
+                        const newOv = { ...overrides };
+                        if (!newOv[selectedId]) newOv[selectedId] = { actions: {} };
+                        const existing = newOv[selectedId].actions[slot.key] ?? getSlotAnim(slot.key);
+                        if (existing) {
+                          newOv[selectedId].actions[slot.key] = { ...existing, hitVfx: e.target.value || undefined };
+                          setOverrides(newOv);
+                        }
+                      }}
+                      className="flex-1 bg-zinc-900 border border-white/10 rounded px-1 py-0.5 text-[10px] text-white/70"
+                    >
+                      <option value="">— no hit VFX —</option>
+                      {ALL_VFX.filter(v => v.categories.includes("impact") || v.categories.includes("melee")).map(v => (
+                        <option key={v.id} value={v.id}>{v.name} ({v.frames}f)</option>
+                      ))}
+                    </select>
+                    <select
+                      value={current?.swingVfx ?? ""}
+                      onChange={e => {
+                        const newOv = { ...overrides };
+                        if (!newOv[selectedId]) newOv[selectedId] = { actions: {} };
+                        const existing = newOv[selectedId].actions[slot.key] ?? getSlotAnim(slot.key);
+                        if (existing) {
+                          newOv[selectedId].actions[slot.key] = { ...existing, swingVfx: e.target.value || undefined };
+                          setOverrides(newOv);
+                        }
+                      }}
+                      className="flex-1 bg-zinc-900 border border-white/10 rounded px-1 py-0.5 text-[10px] text-white/70"
+                    >
+                      <option value="">— no swing VFX —</option>
+                      {ALL_VFX.filter(v => v.categories.includes("melee") || v.categories.includes("fire")).map(v => (
+                        <option key={v.id} value={v.id}>{v.name} ({v.frames}f)</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
 
           {/* Stats section */}
           <div className="p-3 border-t border-white/10">
