@@ -209,7 +209,7 @@ function updateCamera(cam: CameraState, p1: FighterRuntime, p2: FighterRuntime):
     const dx = Math.abs(p1.x - p2.x);
     const dy = Math.abs(p1.y - p2.y);
     const maxSpan = Math.max(dx + 400, dy + 300);
-    const targetZoom = clamp(VIEWPORT_W / maxSpan, 0.45, 1.3);
+    const targetZoom = clamp(VIEWPORT_W / maxSpan, 0.4, 0.95);
     const targetX = midX - (VIEWPORT_W / targetZoom) / 2;
     const targetY = midY - (VIEWPORT_H / targetZoom) / 2 - 60;
     const lerp = 0.06;
@@ -359,8 +359,8 @@ function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet, stage: S
         y: stage.mainFloorY,
         vx: 0,
         vy: 0,
-        width: 120,
-        height: 220,
+        width: 80,
+        height: 160,
         facing: id === "p1" ? 1 : -1,
         hp: 200,
         maxHp: 200,
@@ -1300,10 +1300,23 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             const dodgeSpinDirection = fighter.vx >= 0 ? -1 : 1; // backward flip relative to travel
             const dodgeSpin = isFallbackDodgeSpin ? dodgeSpinDirection * dodgeProgress * Math.PI * 2 : 0;
 
+            // fighter.y = foot position (on platform)
+            // Draw sprite so bottom edge aligns with fighter.y
+            const drawX = fighter.x - drawWidth / 2;
+            const drawY = fighter.y - drawHeight;
+
             ctx.save();
-            ctx.translate(fighter.x, fighter.y - drawHeight / 2);
-            if (fighter.facing < 0) ctx.scale(-1, 1);
-            if (isFallbackDodgeSpin) ctx.rotate(dodgeSpin);
+            if (fighter.facing < 0) {
+                ctx.translate(fighter.x, 0);
+                ctx.scale(-1, 1);
+                ctx.translate(-fighter.x, 0);
+            }
+
+            if (isFallbackDodgeSpin) {
+                ctx.translate(fighter.x, fighter.y - drawHeight / 2);
+                ctx.rotate(dodgeSpin);
+                ctx.translate(-fighter.x, -(fighter.y - drawHeight / 2));
+            }
 
             // Invulnerability flicker (respawn protection)
             if (fighter.invulnUntil > now && Math.floor(now / 80) % 2 === 0) {
@@ -1319,7 +1332,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 currentSprite.image,
                 sourceX, 0,
                 currentSprite.frameWidth, currentSprite.frameHeight,
-                -drawWidth / 2, -drawHeight / 2,
+                drawX, drawY,
                 drawWidth, drawHeight
             );
 
