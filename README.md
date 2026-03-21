@@ -13,8 +13,9 @@ A 2D sprite-based fighting game with 39 playable characters, AI opponents, onlin
 Knight, Archer, Wizard, Orc, Dark Knight, Fire Knight, Elf Ranger, Elf Mage, Barbarian, Necromancer, Pirate Captain, Gunslinger, Shadow Warrior, Fire Wizard, Lightning Mage, Crossbowman, Werebear, Werewolf, Arcane Archer, Leaf Ranger, Martial Hero, Dwarf Mage, Nightborne, Wind Hashashin, Water Priestess, Shardsoul Slayer, Loreon Knight, Elite Orc, Evil Wizard, Wanderer Magician, and more. Each with unique sprites from GRUDA Wars, attack effects, projectiles, and super attacks.
 
 ### Combat System
-- **Melee** (Q/E) — free basic attacks
+- **Melee** (Q/E) — free basic attacks with body-part hitboxes (head 1.3x, body 1x, legs 0.8x)
 - **Dash Attack** (LMB) — lunge forward, distance scales with stamina (up to half-screen)
+- **Air Slam** — attack while falling for 2.5x gravity dive-bomb with damage through descent
 - **Dodge Roll** (AA / DD) — double-tap movement for invulnerable dodge with quick reposition
 - **Block / Parry** (RMB) — counter stance that reflects damage
 - **Ranged** (F) — character-specific projectiles with sprite animations
@@ -38,6 +39,12 @@ Intelligent AI that approaches, attacks in range, dodges projectiles, blocks, us
 
 ### Online PvP
 Socket.io room-based matchmaking with 4-character room codes. Input relay architecture — both clients run the same simulation.
+
+### ObjectStore VFX
+- Smear slash effects (smearH1-3, smearV1-3) from ObjectStore on every melee hit
+- Hit impact flash (hit_effect_1) at contact point
+- Fire breath effects for fire mages (fireBreath, fireBreathHit)
+- All VFX assignable per-character via ToonAdmin
 
 ### Visual Effects
 - Per-character attack effect sprite sheets (Split Effects from GrudgeRPGAssets2d)
