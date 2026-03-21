@@ -576,6 +576,31 @@ function formatTime(seconds: number): string {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
+// Discord webhook for match results
+const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1484799745661734975/9Ffcrz3bmzsyi3342_1MKRkiv_xtThAAaTULB-bKAfw8BQBKIOQj4ZBh7Ivmv3oe-glB";
+
+function postMatchResult(winner: string, loser: string, winnerChar: string, loserChar: string, duration: string, wasOnline: boolean) {
+    const embed = {
+        embeds: [{
+            title: "⚔️ Grudge Fighter — Match Result",
+            color: 0xb91c1c,
+            fields: [
+                { name: "🏆 Winner", value: `**${winner}** (${winnerChar})`, inline: true },
+                { name: "💠 Defeated", value: `${loser} (${loserChar})`, inline: true },
+                { name: "⏱️ Duration", value: duration, inline: true },
+                { name: "🌐 Mode", value: wasOnline ? "Online PvP" : "vs AI", inline: true },
+            ],
+            footer: { text: "Grudge Fighter · grudge-studio.com" },
+            timestamp: new Date().toISOString(),
+        }],
+    };
+    fetch(DISCORD_WEBHOOK, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(embed),
+    }).catch(() => {}); // fire and forget
+}
+
 // Renders a single mid-attack frame from the sprite strip onto a canvas
 function AttackFrameCanvas({ src, frames, frameSize, size }: { src: string; frames: number; frameSize: number; size: number }) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -2039,26 +2064,97 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         return null;
     }, [hud.winner, p1Pick, p2Pick]);
 
+    // Post match result to Discord when game ends
+    const matchPostedRef = useRef(false);
+    useEffect(() => {
+        if (!hud.winner) { matchPostedRef.current = false; return; }
+        if (matchPostedRef.current) return;
+        matchPostedRef.current = true;
+        const winner = hud.winner === "p1" ? (p1Pick?.name ?? "P1") : (p2Pick?.name ?? "P2");
+        const loser = hud.winner === "p1" ? (p2Pick?.name ?? "P2") : (p1Pick?.name ?? "P1");
+        const winChar = hud.winner === "p1" ? (p1Pick?.name ?? "?") : (p2Pick?.name ?? "?");
+        const loseChar = hud.winner === "p1" ? (p2Pick?.name ?? "?") : (p1Pick?.name ?? "?");
+        postMatchResult(winner, loser, winChar, loseChar, formatTime(hud.elapsed), isOnline);
+    }, [hud.winner]);
+
     // ─── MODE SELECT ─────────────────────────────────────────────
     if (selectPhase === "mode") {
         return (
-            <div className="min-h-screen bg-slate-950 text-white p-4 md:p-6">
-                <div className="max-w-[600px] mx-auto space-y-8 pt-20">
-                    <div className="text-center space-y-2">
-                        <h1 className="text-4xl font-bold text-amber-300 font-serif">Grudge Fighter</h1>
-                        <p className="text-white/50">Choose your mode</p>
+            <div className="min-h-screen text-white relative overflow-hidden" style={{
+                background: 'radial-gradient(ellipse at center bottom, rgba(139,0,0,0.15) 0%, transparent 60%), #000',
+            }}>
+                {/* Background image */}
+                <div className="absolute inset-0 opacity-10" style={{
+                    backgroundImage: 'url(/favicon.png)',
+                    backgroundSize: '300px',
+                    backgroundPosition: 'center 30%',
+                    backgroundRepeat: 'no-repeat',
+                    filter: 'blur(1px)',
+                }} />
+
+                <div className="relative z-10 max-w-[500px] mx-auto pt-16 px-6">
+                    {/* Logo + Title */}
+                    <div className="text-center mb-10">
+                        <img src="/favicon.png" alt="Grudge" className="w-24 h-24 mx-auto mb-4 rounded-full" style={{
+                            border: '2px solid rgba(185,28,28,0.5)',
+                            boxShadow: '0 0 40px rgba(185,28,28,0.3)',
+                        }} />
+                        <h1 className="text-4xl font-black tracking-wider" style={{
+                            fontFamily: 'Georgia, serif',
+                            background: 'linear-gradient(180deg, #fff 0%, #b91c1c 100%)',
+                            WebkitBackgroundClip: 'text',
+                            WebkitTextFillColor: 'transparent',
+                            filter: 'drop-shadow(0 0 20px rgba(185,28,28,0.4))',
+                        }}>GRUDGE FIGHTER</h1>
+                        <p className="text-white/30 text-sm mt-1 tracking-[0.3em] uppercase">39 Warriors · No Mercy</p>
                     </div>
-                    <div className="space-y-4">
-                        <Button onClick={() => { setVsAI(true); setSelectPhase("p1"); }} className="w-full h-16 text-lg bg-emerald-600 hover:bg-emerald-500">
-                            <Shield className="w-5 h-5 mr-3" /> vs AI
-                        </Button>
-                        <Button onClick={() => { pvp.connect(); setSelectPhase("lobby"); }} className="w-full h-16 text-lg bg-purple-600 hover:bg-purple-500">
-                            <Globe className="w-5 h-5 mr-3" /> Online PvP
-                        </Button>
+
+                    {/* Main Buttons */}
+                    <div className="space-y-3">
+                        <button onClick={() => { setVsAI(true); setSelectPhase("p1"); }}
+                            className="w-full py-4 rounded-lg font-bold text-lg tracking-wider transition-all hover:scale-[1.02] hover:shadow-lg"
+                            style={{ background: 'linear-gradient(135deg, #b91c1c, #7f1d1d)', boxShadow: '0 4px 20px rgba(185,28,28,0.3)' }}>
+                            ⚔️ &nbsp; VS AI
+                        </button>
+                        <button onClick={() => { pvp.connect(); setSelectPhase("lobby"); }}
+                            className="w-full py-4 rounded-lg font-bold text-lg tracking-wider transition-all hover:scale-[1.02]"
+                            style={{ background: 'linear-gradient(135deg, #6d28d9, #4c1d95)', boxShadow: '0 4px 20px rgba(109,40,217,0.3)' }}>
+                            🌐 &nbsp; ONLINE PVP
+                        </button>
                     </div>
-                    <Button variant="ghost" className="text-white/50 mx-auto block" onClick={onBack}>
-                        <ArrowLeft className="w-4 h-4 mr-2" /> Back
-                    </Button>
+
+                    {/* Secondary row */}
+                    <div className="grid grid-cols-2 gap-3 mt-4">
+                        <button onClick={() => { window.location.hash = 'toonadmin'; }}
+                            className="py-3 rounded-lg text-sm font-semibold border border-white/10 bg-white/5 hover:bg-white/10 transition-all">
+                            🎨 Character Editor
+                        </button>
+                        <a href="https://molochdagod.github.io/Grudge-RPG-Sprite-Attack/" target="_blank"
+                            className="py-3 rounded-lg text-sm font-semibold border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-center block">
+                            🏠 Landing Page
+                        </a>
+                    </div>
+
+                    {/* Tertiary row */}
+                    <div className="grid grid-cols-3 gap-2 mt-3">
+                        <a href="https://molochdagod.github.io/Grudge-RPG-Sprite-Attack/serverconnect.html" target="_blank"
+                            className="py-2.5 rounded text-xs font-medium text-white/40 border border-white/5 bg-white/[0.02] hover:bg-white/5 text-center block">
+                            🔧 Servers
+                        </a>
+                        <a href="https://discord.gg/grudge" target="_blank"
+                            className="py-2.5 rounded text-xs font-medium text-[#7289da] border border-[#7289da]/20 bg-[#7289da]/5 hover:bg-[#7289da]/10 text-center block">
+                            💬 Discord
+                        </a>
+                        <a href="https://github.com/MolochDaGod/Grudge-RPG-Sprite-Attack" target="_blank"
+                            className="py-2.5 rounded text-xs font-medium text-white/40 border border-white/5 bg-white/[0.02] hover:bg-white/5 text-center block">
+                            ⭐ GitHub
+                        </a>
+                    </div>
+
+                    {/* Version info */}
+                    <div className="text-center mt-8 text-white/15 text-[10px] tracking-widest uppercase">
+                        39 Fighters · 4 Stages · Grudge Studio
+                    </div>
                 </div>
             </div>
         );
