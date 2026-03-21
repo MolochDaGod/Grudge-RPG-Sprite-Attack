@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { ArrowLeft, Crosshair, Shield, Zap, Wifi, Globe } from "lucide-react";
 import { usePvP } from "@/hooks/usePvP";
 import { GRUDA_ROSTER, type GrudaCharDef } from "@/lib/grudaRoster";
+import { preloadVfx, getVfxById, getVfxImage, drawVfxFrame, type VfxDef } from "@/lib/vfxLibrary";
 
 type FighterId = "p1" | "p2";
 type AnimationState = "idle" | "run" | "jump" | "fall" | "attack" | "takeHit" | "death" | "dodge";
@@ -424,6 +425,7 @@ function isOnPlatform(fighter: FighterRuntime, stage: StageDefinition): number |
     return null;
 }
 
+// Body-part hitboxes for more precise collision
 function hurtBox(fighter: FighterRuntime) {
     return {
         x: fighter.x - fighter.width / 2,
@@ -431,6 +433,15 @@ function hurtBox(fighter: FighterRuntime) {
         w: fighter.width,
         h: fighter.height,
     };
+}
+function headBox(fighter: FighterRuntime) {
+    return { x: fighter.x - fighter.width * 0.3, y: fighter.y - fighter.height, w: fighter.width * 0.6, h: fighter.height * 0.25 };
+}
+function bodyBox(fighter: FighterRuntime) {
+    return { x: fighter.x - fighter.width * 0.4, y: fighter.y - fighter.height * 0.75, w: fighter.width * 0.8, h: fighter.height * 0.4 };
+}
+function legsBox(fighter: FighterRuntime) {
+    return { x: fighter.x - fighter.width * 0.35, y: fighter.y - fighter.height * 0.35, w: fighter.width * 0.7, h: fighter.height * 0.35 };
 }
 
 function intersectRect(
@@ -1138,6 +1149,9 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
         const maybeLoad = (src?: string) => src ? loadImage(src).catch(() => null) : Promise.resolve(null);
 
+        // Preload ObjectStore VFX in background
+        preloadVfx();
+
         Promise.all([
             loadSpriteSet(p1Pick.sprites),
             loadSpriteSet(p2Pick.sprites),
@@ -1651,7 +1665,10 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             let x = fighter.x + vx;
             let y = fighter.y + fighter.vy;
             // Characters fall 20% slower than raw gravity
-            let vy = fighter.vy + GRAVITY * FALL_GRAVITY_SCALE;
+            // AIR SLAM: attacking while falling accelerates downward
+            const isAirAttacking = fighter.state === "attack" && fighter.vy > 0;
+            const gravScale = isAirAttacking ? 2.5 : FALL_GRAVITY_SCALE;
+            let vy = fighter.vy + GRAVITY * gravScale;
 
             // Platform collision
             const stage = stageRef.current;
@@ -1705,29 +1722,34 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             if (attacker.attackHasConnected) return { attacker, defender };
             if (attacker.frameIndex < attacker.attackHitFrame) return { attacker, defender };
 
+            // Attack hitbox scales with character render size
+            const charDef = attacker.id === "p1" ? p1Pick : p2Pick;
+            const atkReach = (charDef?.renderScale ?? 1) * 80;
             const hitBox = {
-                x: attacker.x + attacker.facing * 30 - (attacker.facing > 0 ? 0 : 80),
+                x: attacker.x + attacker.facing * 30 - (attacker.facing > 0 ? 0 : atkReach),
                 y: attacker.y - attacker.height * 0.78,
-                w: 80,
-                h: 100,
+                w: atkReach,
+                h: attacker.height * 0.5,
             };
-            const targetHurt = hurtBox(defender);
-            if (!intersectRect(hitBox, targetHurt)) {
-                return {
-                    attacker: { ...attacker, attackHasConnected: true },
-                    defender,
-                };
+
+            // Check body-part hitboxes for damage zones
+            const headHit = intersectRect(hitBox, headBox(defender));
+            const bodyHit = intersectRect(hitBox, bodyBox(defender));
+            const legsHit = intersectRect(hitBox, legsBox(defender));
+            const anyHit = headHit || bodyHit || legsHit;
+
+            if (!anyHit) {
+                return { attacker: { ...attacker, attackHasConnected: true }, defender };
             }
 
-            // Dodge i-frames: attack should whiff without hit effects
+            // Dodge i-frames
             if (defender.invulnUntil > now) {
-                return {
-                    attacker: { ...attacker, attackHasConnected: true },
-                    defender,
-                };
+                return { attacker: { ...attacker, attackHasConnected: true }, defender };
             }
 
-            const result = applyDamage(defender, attacker, attacker.moveSet.baseDamage, now);
+            // Head hits deal 1.3x damage
+            const damageMultiplier = headHit ? 1.3 : legsHit ? 0.8 : 1.0;
+            const result = applyDamage(defender, attacker, Math.round(attacker.moveSet.baseDamage * damageMultiplier), now);
 
             // Spawn attack effect sprite at the hit point
             const fxAssets = assetsRef.current;
@@ -1738,8 +1760,20 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     defender.x, defender.y - defender.height * 0.5, attacker.facing < 0);
             }
 
-            // Screen shake and hit flash on damage
-            triggerScreenShake(result.wasCounter ? 12 : 6, result.wasCounter ? 200 : 120);
+            // Also spawn ObjectStore VFX (smear on swing, hit_effect on contact)
+            const smearVfx = getVfxById(headHit ? "smearV1" : "smearH1");
+            const hitVfx = getVfxById("hit_effect_1");
+            if (smearVfx) {
+                const smearImg = getVfxImage(smearVfx.id);
+                if (smearImg) spawnEffect(smearImg, smearVfx.frames, 2, attacker.x + attacker.facing * 40, attacker.y - attacker.height * 0.5, attacker.facing < 0);
+            }
+            if (hitVfx) {
+                const hitImg = getVfxImage(hitVfx.id);
+                if (hitImg) spawnEffect(hitImg, hitVfx.frames, 2, defender.x, defender.y - defender.height * 0.5, false);
+            }
+
+            // Screen shake and hit flash — stronger on headshots
+            triggerScreenShake(headHit ? 10 : result.wasCounter ? 12 : 6, result.wasCounter ? 200 : 120);
             triggerHitFlash(defender.id as FighterId, 100);
 
             return {
