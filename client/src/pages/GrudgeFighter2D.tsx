@@ -7,6 +7,7 @@ import { usePvP } from "@/hooks/usePvP";
 import { GRUDA_ROSTER, type GrudaCharDef } from "@/lib/grudaRoster";
 import { preloadVfx, getVfxById, getVfxImage, drawVfxFrame, type VfxDef } from "@/lib/vfxLibrary";
 import { getFaction, type FactionId } from "@/lib/factions";
+import { playSound, preloadSounds as preloadGameSounds } from "@/lib/gameSounds";
 
 type FighterId = "p1" | "p2";
 type AnimationState = "idle" | "run" | "jump" | "fall" | "attack" | "attack2" | "special" | "takeHit" | "death" | "dodge";
@@ -85,6 +86,7 @@ interface FighterRuntime {
     lastStaminaRegen: number;
     dropThroughUntil: number;
     moveVariant: MoveVariant;
+    rescueUsed: boolean;       // true after rescue roll in air — resets on landing
     moveSet: CharacterMoveSet;
 }
 
@@ -274,6 +276,7 @@ const STAMINA_COST_SPECIAL = 2;
 const EXHAUSTION_PENALTY_MS = 300; // lockout when spamming at 0 stamina
 const DASH_VX_PER_POINT = 7;      // velocity per stamina point spent
 const DODGE_DOUBLE_TAP_MS = 220;   // AA / DD input window
+const SPACE_DOUBLE_TAP_MS = 250;   // spacebar double-tap for rescue roll
 const DOWN_DROP_DOUBLE_TAP_MS = 220; // SS input window
 const DODGE_LOCK_MS = 340;         // total dodge action duration
 const DODGE_IFRAME_MS = 260;       // invulnerable window during dodge
@@ -459,7 +462,7 @@ function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet, stage: S
         lastStaminaRegen: performance.now(),
         dropThroughUntil: 0,
         moveVariant: "none",
-        moveSet,
+        rescueUsed: false,
     };
 }
 
@@ -486,6 +489,7 @@ function respawnFighter(fighter: FighterRuntime, stage: StageDefinition): Fighte
         lastStaminaRegen: now,
         dropThroughUntil: 0,
         moveVariant: "none",
+        rescueUsed: false,
     };
 }
 
@@ -635,27 +639,45 @@ function setState(fighter: FighterRuntime, state: AnimationState, now: number): 
 }
 
 // Smash-style knockback: the lower your HP, the further you fly
-function calcKnockback(damage: number, targetHp: number, targetMaxHp: number): { kbX: number; kbY: number; hitstun: number } {
+// moveVariant controls launch angle: up-special launches upward, down attacks spike down
+type KnockbackAngle = "neutral" | "up" | "down" | "spike" | "forward";
+function calcKnockback(damage: number, targetHp: number, targetMaxHp: number, angle: KnockbackAngle = "neutral"): { kbX: number; kbY: number; hitstun: number } {
     const hpPercent = 1 - (targetHp / targetMaxHp); // 0 at full HP, ~1 at near-death
     const baseKb = 3 + damage * 0.25;
     const scaledKb = baseKb * (1 + hpPercent * 2.5); // up to 3.5x knockback at low HP
-    const kbY = -(2 + hpPercent * 8 + damage * 0.15); // more upward launch at low HP
+    let kbX = scaledKb;
+    let kbY = -(2 + hpPercent * 8 + damage * 0.15); // default upward
     const hitstun = 200 + hpPercent * 300; // longer hitstun at low HP
-    return { kbX: scaledKb, kbY, hitstun };
+
+    // Directional knockback per attack type
+    if (angle === "up") {
+        kbY *= 1.6;           // strong upward launch
+        kbX *= 0.4;           // minimal horizontal
+    } else if (angle === "down" || angle === "spike") {
+        kbY = Math.abs(kbY) * 0.8;  // downward spike (positive Y = down)
+        kbX *= 0.5;
+    } else if (angle === "forward") {
+        kbY *= 0.5;           // low-angle forward launch
+        kbX *= 1.3;
+    }
+
+    return { kbX, kbY, hitstun };
 }
 
 function applyDamage(
     target: FighterRuntime,
     attacker: FighterRuntime,
     damage: number,
-    now: number
+    now: number,
+    kbAngle: KnockbackAngle = "neutral"
 ): { target: FighterRuntime; attacker: FighterRuntime; wasCounter: boolean } {
     // Invulnerability check (respawn protection)
     if (target.invulnUntil > now) {
         return { target, attacker, wasCounter: false };
     }
     if (target.counterUntil > now && target.state !== "death") {
-        const counterKb = calcKnockback(target.moveSet.counterDamage, attacker.hp, attacker.maxHp);
+        const counterKb = calcKnockback(target.moveSet.counterDamage, attacker.hp, attacker.maxHp, "forward");
+        playSound("parry");
         const newAttackerHp = Math.max(0, attacker.hp - target.moveSet.counterDamage);
         const nextAttacker = setState(
             {
@@ -676,7 +698,7 @@ function applyDamage(
     }
 
     const nextHp = Math.max(0, target.hp - damage);
-    const kb = calcKnockback(damage, target.hp, target.maxHp);
+    const kb = calcKnockback(damage, target.hp, target.maxHp, kbAngle);
     const damagedTarget = setState(
         {
             ...target,
@@ -846,6 +868,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         p1: { left: 0, right: 0, down: 0 },
         p2: { left: 0, right: 0, down: 0 },
     });
+    const spaceTapRef = useRef<Record<FighterId, number>>({ p1: 0, p2: 0 });
     const animationFrameRef = useRef<number | null>(null);
     const [isReady, setIsReady] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
@@ -922,13 +945,14 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         const actor = fighterId === "p1" ? world.p1 : world.p2;
         if (world.winner || actor.hp <= 0) return;
         if (now < actor.stateLockUntil || now < actor.specialCooldownUntil) return;
+        if (actor.rescueUsed) return;  // one rescue per airborne — like Smash up-B
 
         const dx = targetX - actor.x;
         const dy = targetY - (actor.y - actor.height * 0.5);
         const len = Math.hypot(dx, dy) || 1;
         const nx = dx / len;
         const ny = dy / len;
-        const rescueSpeed = DODGE_AIR_SPEED * 1.2;
+        const rescueSpeed = DODGE_AIR_SPEED * 1.6;  // strong enough to recover from off-stage
 
         const next = setState(
             {
@@ -938,16 +962,18 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 facing: nx >= 0 ? 1 : -1,
                 attackHasConnected: false,
                 moveVariant: "rescue",
+                rescueUsed: true,
                 counterUntil: 0,
-                stateLockUntil: now + DODGE_LOCK_MS + 70,
-                specialCooldownUntil: now + DODGE_COOLDOWN_MS + 220,
-                invulnUntil: Math.max(actor.invulnUntil, now + DODGE_IFRAME_MS),
+                stateLockUntil: now + DODGE_LOCK_MS + 120,   // longer roll duration for distance
+                specialCooldownUntil: now + DODGE_COOLDOWN_MS + 300,
+                invulnUntil: Math.max(actor.invulnUntil, now + DODGE_IFRAME_MS + 80),  // extended i-frames for recovery
             },
             "dodge",
             now
         );
         if (fighterId === "p1") world.p1 = next;
         else world.p2 = next;
+        playSound("rescue_roll");
     }, []);
 
     const resetMatch = useCallback(() => {
@@ -997,6 +1023,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             useAltAnimation ? "attack2" : "attack",
             now
         );
+        playSound("swoosh_light");
 
         if (fighterId === "p1") {
             world.p1 = next;
@@ -1072,6 +1099,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             else world.p2 = next;
 
             world.projectiles.push(projectile);
+            playSound("projectile_fire");
             return;
         }
 
@@ -1129,13 +1157,13 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         const stage = stageRef.current;
         const grounded = stage ? isOnPlatform(actor, stage) !== null : actor.y >= 600;
         if (grounded) {
-            // Ground jump
             const next = setState({ ...actor, vy: -actor.moveSet.jumpForce * SPEED_SCALE, airJumpsLeft: MAX_AIR_JUMPS, moveVariant: "none", attackHasConnected: false }, "jump", now);
             if (fighterId === "p1") world.p1 = next; else world.p2 = next;
+            playSound("jump");
         } else if (actor.airJumpsLeft > 0) {
-            // Air jump (double jump)
             const next = setState({ ...actor, vy: -actor.moveSet.jumpForce * SPEED_SCALE * 0.85, airJumpsLeft: actor.airJumpsLeft - 1, moveVariant: "none", attackHasConnected: false }, "jump", now);
             if (fighterId === "p1") world.p1 = next; else world.p2 = next;
+            playSound("jump");
         }
     }, []);
 
@@ -1149,6 +1177,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         world.superFreeze = { attacker: fighterId, until: now + SUPER_FREEZE_DURATION, damageAt: now + SUPER_FREEZE_DURATION * 0.7, dealt: false };
         const next = setState({ ...actor, superMeter: 0, stateLockUntil: now + SUPER_FREEZE_DURATION + 200, attackHasConnected: false, moveVariant: "none" }, "special", now);
         if (fighterId === "p1") world.p1 = next; else world.p2 = next;
+        playSound("super_charge");
     }, []);
 
     const queueDodge = useCallback((fighterId: FighterId, direction: -1 | 1) => {
@@ -1182,6 +1211,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
         if (fighterId === "p1") world.p1 = next;
         else world.p2 = next;
+        playSound("dodge");
     }, []);
 
     const queueDropThrough = useCallback((fighterId: FighterId) => {
@@ -1249,9 +1279,10 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             now
         );
         if (fighterId === "p1") world.p1 = next; else world.p2 = next;
+        playSound("swoosh_heavy");
     }, []);
 
-    // RMB: Block / Parry — enter counter stance
+    // RMB: Block / Parry
     const queueBlock = useCallback((fighterId: FighterId) => {
         const world = worldRef.current;
         if (!world || world.superFreeze) return;
@@ -1273,10 +1304,25 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             now
         );
         if (fighterId === "p1") world.p1 = next; else world.p2 = next;
+        playSound("block");
     }, []);
 
     const processInput = useCallback((fighterId: FighterId, controls: typeof P1_CONTROLS, key: string) => {
         const keys = pressedKeysRef.current;
+        // Spacebar = jump (alias for W) + double-tap space = rescue roll toward mouse
+        if (key === " ") {
+            const now = performance.now();
+            const lastTap = spaceTapRef.current[fighterId];
+            spaceTapRef.current[fighterId] = now;
+            if (now - lastTap <= SPACE_DOUBLE_TAP_MS) {
+                spaceTapRef.current[fighterId] = 0;
+                const target = mouseWorldRef.current;
+                queueRescueRoll(fighterId, target.x, target.y);
+                return;
+            }
+            tryJump(fighterId);
+            return;
+        }
         if (key === controls.jump) tryJump(fighterId);
         if (key === controls.attack1) {
             const up = keys.has(controls.jump);
@@ -1568,8 +1614,9 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
         const maybeLoad = (src?: string) => src ? loadImage(src).catch(() => null) : Promise.resolve(null);
 
-        // Preload ObjectStore VFX in background
+        // Preload ObjectStore VFX and game sounds in background
         preloadVfx();
+        preloadGameSounds();
 
         Promise.all([
             loadSpriteSet(p1Pick.sprites),
@@ -2289,7 +2336,17 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     attacker.moveVariant === "upSpecial" ? attacker.moveSet.upSpecialDamage :
                         attacker.moveVariant === "downSpecial" ? Math.round(attacker.moveSet.counterDamage * 0.9) :
                             attacker.moveSet.baseDamage;
-            const result = applyDamage(defender, attacker, Math.round(baseDamage * damageMultiplier), now);
+
+            // Directional knockback based on move type
+            const kbAngle: KnockbackAngle =
+                attacker.moveVariant === "upSpecial" ? "up" :
+                attacker.moveVariant === "downSpecial" ? "down" :
+                attacker.moveVariant === "dash" ? "forward" :
+                headHit ? "up" : "neutral";
+            const result = applyDamage(defender, attacker, Math.round(baseDamage * damageMultiplier), now, kbAngle);
+
+            // Sound
+            playSound(headHit ? "hit_head" : attacker.moveVariant === "dash" ? "hit_heavy" : "hit_light");
 
             // Spawn attack effect sprite at the hit point
             const fxAssets = assetsRef.current;
@@ -2337,6 +2394,21 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             if (!rectIntersectsEllipse(hitBox, bodyEllipse(defender))) return { attacker, defender };
             if (defender.invulnUntil > now) return { attacker: { ...attacker, attackHasConnected: true }, defender };
 
+            // If defender is blocking/parrying, reject the rescue roll — push attacker opposite direction
+            if (defender.counterUntil > now) {
+                const rejectSpeed = DODGE_AIR_SPEED * 1.2;
+                const rejectedAttacker = setState({
+                    ...attacker,
+                    vx: -attacker.vx * 0.8,
+                    vy: -(Math.abs(attacker.vy) * 0.6 + 4),
+                    attackHasConnected: true,
+                    stateLockUntil: now + 400,
+                    rescueUsed: true,  // stays locked
+                }, "takeHit", now);
+                playSound("parry");
+                return { attacker: rejectedAttacker, defender: { ...defender, counterUntil: 0 } };
+            }
+
             const result = applyDamage(defender, attacker, Math.round(attacker.moveSet.baseDamage * 1.1), now);
             const fighterKey = attacker.id === "p1" ? (p1Pick?.id ?? "p1") : (p2Pick?.id ?? "p2");
             const swingVfx = getVfxById(pickMoveVfxId("rescue", fighterKey, SWING_VFX_BY_MOVE));
@@ -2368,6 +2440,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             if (world.superFreeze) {
                 if (now >= world.superFreeze.damageAt && !world.superFreeze.dealt) {
                     world.superFreeze.dealt = true;
+                    playSound("super_impact");
                     const atkId = world.superFreeze.attacker;
                     const atk = atkId === "p1" ? world.p1 : world.p2;
                     const def = atkId === "p1" ? world.p2 : world.p1;
@@ -2471,6 +2544,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                                 if (bounceImg) spawnEffect(bounceImg, bounceVfx.frames, 2, updated.x, floorY, false);
                             }
                             triggerScreenShake(5, 80);
+                            playSound("bounce");
                         } else {
                             // Final bounce: splash damage to nearby fighters
                             const SPLASH_RADIUS = 120;
@@ -2603,6 +2677,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 const oob = f.x < bz.left || f.x > bz.right || f.y < bz.top || f.y > bz.bottom;
                 const hpDead = f.hp <= 0;
                 if (oob || hpDead) {
+                    playSound("stock_lost");
                     const newStocks = f.stocks - 1;
                     if (newStocks <= 0) {
                         return { ...f, stocks: 0, hp: 0, state: "death" as AnimationState, stateSince: now };
@@ -2617,8 +2692,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             // Reset air jumps on landing
             const landingFloorP1 = isOnPlatform(nextP1, stage, now < nextP1.dropThroughUntil);
             const landingFloorP2 = isOnPlatform(nextP2, stage, now < nextP2.dropThroughUntil);
-            if (landingFloorP1 !== null) nextP1 = { ...nextP1, airJumpsLeft: MAX_AIR_JUMPS };
-            if (landingFloorP2 !== null) nextP2 = { ...nextP2, airJumpsLeft: MAX_AIR_JUMPS };
+            if (landingFloorP1 !== null) nextP1 = { ...nextP1, airJumpsLeft: MAX_AIR_JUMPS, rescueUsed: false };
+            if (landingFloorP2 !== null) nextP2 = { ...nextP2, airJumpsLeft: MAX_AIR_JUMPS, rescueUsed: false };
 
             const winner = nextP1.stocks <= 0 ? "p2" : nextP2.stocks <= 0 ? "p1" : null;
 

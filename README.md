@@ -21,16 +21,17 @@ Faction emblems display on the character select grid and in the fight HUD.
 - **Melee 1** (Q) — default combo starter with body-part hitboxes (head 1.3x, body 1x, legs 0.8x)
 - **Melee 2** (E ground) — alternate strike animation with differentiated VFX
 - **Dash Attack** (LMB) — lunge forward, distance scales with stamina (up to half-screen)
-- **Rescue Roll** (W + LMB) — roll toward mouse as a fast maneuver; damages on collision
+- **Rescue Roll** (W + LMB or double-tap Spacebar) — roll toward mouse; damages on collision. One use per airborne (resets on landing, like Smash up-B). If blocked/parried, attacker is pushed away at opposite angle and rescue stays locked
 - **Air Slam** — attack while falling for 2.5x gravity dive-bomb with damage through descent
 - **Dodge Roll** (AA / DD) — double-tap movement for invulnerable dodge with quick reposition (ground + air)
 - **Platform Drop** (SS) — double-tap down to fall through floating one-way platforms (not main floor)
 - **Block / Parry** (RMB) — counter stance that reflects damage
 - **Ranged** (F) — character-specific projectiles with sprite animations
 - **Air Ranged Alt** (E in air) — shoots projectile straight forward; **E+S in air** shoots angled downward
-- **Up Special** (W+Q/E) — aerial dash strike
-- **Down Special** (S+Q/E) — counter stance
+- **Up Special** (W+Q/E) — aerial dash strike with strong upward knockback
+- **Down Special** (S+Q/E) — counter stance with downward spike knockback
 - **Super Attack** (R) — Smash Bros-style cutscene when meter is full
+- **Directional Knockback** — up-special launches upward, down-special spikes, dash sends forward, headshots launch at upward angle
 - **Elliptical Body Collision** -- body collider is an ellipse that follows the character outline, naturally excluding weapon reach. Weapon hitbox is a separate rect active only during attack frames
 - **Bouncing Bomb** (E+S in air) -- down-angle projectile that bounces twice then detonates for 75% splash damage within 120px
 - **Debug Collision Overlay** (backtick key) -- toggle visible body ellipses (yellow), damage sub-zones (head/torso/legs dashed), weapon hitbox (pink, attack frames only), and foot anchor dots
@@ -83,7 +84,7 @@ Full admin tool at `#toonadmin` for editing all 39 characters:
 
 ## Tech Stack
 
-- **Frontend** — React 18, Vite 6, Tailwind CSS, Canvas 2D
+- **Frontend** — React 18, Vite 6, Tailwind CSS, Canvas 2D, Howler.js (audio)
 - **PvP Server** — Node.js + Socket.io on Railway
 - **Backend** — Express, PostgreSQL (Drizzle ORM), Grudge Studio backend
 - **Deployment** — Vercel (frontend), Railway (PvP), Docker (fullstack)
@@ -108,12 +109,14 @@ client/
     hooks/usePvP.ts              # Socket.io PvP client hook
     lib/grudaRoster.ts           # 39-character roster data with faction assignments
     lib/factions.ts              # Faction definitions (Crusade, Legion, Fabled)
+    lib/gameSounds.ts            # Howler.js sound system (20 SFX types, pooled, pitch-randomized)
     lib/charConfig.ts            # Character config persistence
   public/fighter2d/
     characters/                  # 39 character sprite folders
     effects/                     # Attack effect sprite strips
     projectiles/                 # Arrow, fireball, bullet, axe sprites
     image/factions/              # Faction emblem PNGs (crusade, legion, fabled)
+    sfx/                         # Game sound effects (MP3)
   public/startup-intro.mp4       # Startup cinematic
   public/landing-bg.jpg          # Landing page hero background
 server/
@@ -131,11 +134,11 @@ docs/
 | Action | Keyboard | Mouse | Gamepad |
 |--------|----------|-------|---------|
 | Move | A/D | — | Left Stick / D-Pad |
-| Jump | W | — | Y |
+| Jump | W or Spacebar | — | Y |
 | Melee 1 | Q | — | A |
 | Melee 2 | E (ground) | — | X |
 | Dash Attack | — | LMB | RT |
-| Rescue Roll | W + LMB | W + LMB | — |
+| Rescue Roll | W + LMB or double-tap Spacebar | toward mouse | — |
 | Dodge Roll | Double-tap A/D (AA or DD) | — | Double-tap Left/Right |
 | Drop Through Floating Platforms | Double-tap S (SS) | — | Double-tap Down |
 | Block / Parry | — | RMB | LT |
