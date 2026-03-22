@@ -6,6 +6,7 @@ import { ArrowLeft, Crosshair, Shield, Zap, Wifi, Globe } from "lucide-react";
 import { usePvP } from "@/hooks/usePvP";
 import { GRUDA_ROSTER, type GrudaCharDef } from "@/lib/grudaRoster";
 import { preloadVfx, getVfxById, getVfxImage, drawVfxFrame, type VfxDef } from "@/lib/vfxLibrary";
+import { getFaction, type FactionId } from "@/lib/factions";
 
 type FighterId = "p1" | "p2";
 type AnimationState = "idle" | "run" | "jump" | "fall" | "attack" | "attack2" | "special" | "takeHit" | "death" | "dodge";
@@ -294,6 +295,7 @@ interface EffectSpriteDef {
 interface CharacterDef {
     id: string;
     name: string;
+    faction: FactionId;
     sprites: FighterSpriteSet;
     moveSet: CharacterMoveSet;
     color: string;
@@ -340,6 +342,7 @@ function grudaToCharDef(g: GrudaCharDef): CharacterDef {
     return {
         id: g.id,
         name: g.name,
+        faction: g.faction,
         color: g.color,
         sprites: {
             idle:    s(g.idle[0], g.idle[1], true),
@@ -566,6 +569,21 @@ function circleIntersectsRect(
 
 function axisOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): number {
     return Math.min(aEnd, bEnd) - Math.max(aStart, bStart);
+}
+
+function resolveFighterSeparation(a: FighterRuntime, b: FighterRuntime): { a: FighterRuntime; b: FighterRuntime } {
+    const aBox = hurtBox(a);
+    const bBox = hurtBox(b);
+    const overlapX = axisOverlap(aBox.x, aBox.x + aBox.w, bBox.x, bBox.x + bBox.w);
+    const overlapY = axisOverlap(aBox.y, aBox.y + aBox.h, bBox.y, bBox.y + bBox.h);
+    if (overlapX <= 0 || overlapY <= 0) return { a, b };
+
+    const dir = a.x === b.x ? (a.id === "p1" ? -1 : 1) : Math.sign(a.x - b.x);
+    const pushEach = overlapX * 0.5 + 0.01;
+    return {
+        a: { ...a, x: a.x + dir * pushEach },
+        b: { ...b, x: b.x - dir * pushEach },
+    };
 }
 
 function setState(fighter: FighterRuntime, state: AnimationState, now: number): FighterRuntime {
@@ -2039,7 +2057,6 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             if (overlapX > 0 && overlapY > 0) {
                 const pushDir = x === opponent.x ? (fighter.id === "p1" ? -1 : 1) : Math.sign(x - opponent.x);
                 x += pushDir * (overlapX * 0.5 + 0.01);
-                x += push;
             }
 
             const facing = opponent.x >= x ? 1 : -1;
@@ -2247,6 +2264,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 nextP2 = updateMovement(world.p2, world.p1, P2_CONTROLS, now);
             }
 
+            // Symmetric push: resolve body overlap evenly for both fighters
+            const separated = resolveFighterSeparation(nextP1, nextP2);
+            nextP1 = separated.a;
+            nextP2 = separated.b;
+
             nextP1 = tickFighterAnimation(nextP1, assets.p1, now);
             nextP2 = tickFighterAnimation(nextP2, assets.p2, now);
 
@@ -2295,12 +2317,30 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                             }
                             triggerScreenShake(5, 80);
                         } else {
+                            // Final bounce: splash damage to nearby fighters
+                            const SPLASH_RADIUS = 120;
+                            const splashDmg = Math.round(updated.damage * 0.75);
+                            const targets = updated.owner === "p1" ? [{ ref: "p2" as const, f: nextP2 }] : [{ ref: "p1" as const, f: nextP1 }];
+                            for (const t of targets) {
+                                const dx = t.f.x - updated.x;
+                                const dy = (t.f.y - t.f.height * 0.5) - floorY;
+                                if (Math.hypot(dx, dy) < SPLASH_RADIUS && t.f.invulnUntil <= now) {
+                                    const result = applyDamage(
+                                        t.ref === "p1" ? nextP1 : nextP2,
+                                        t.ref === "p1" ? nextP2 : nextP1,
+                                        splashDmg, now
+                                    );
+                                    if (t.ref === "p1") { nextP1 = result.target; nextP2 = result.attacker; }
+                                    else { nextP2 = result.target; nextP1 = result.attacker; }
+                                    triggerHitFlash(t.ref, 100);
+                                }
+                            }
                             const endVfx = getVfxById(updated.hitVfxId) ?? getVfxById("explosionSmall");
                             if (endVfx) {
                                 const endImg = getVfxImage(endVfx.id);
                                 if (endImg) spawnEffect(endImg, endVfx.frames, 2, updated.x, floorY - 8, false);
                             }
-                            triggerScreenShake(9, 120);
+                            triggerScreenShake(12, 160);
                             continue;
                         }
                     }
@@ -2752,11 +2792,14 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                        {CHARACTER_ROSTER.map((char) => (
+                        {CHARACTER_ROSTER.map((char) => {
+                            const faction = getFaction(char.faction);
+                            return (
                             <button
                                 key={char.id}
                                 onClick={() => handleCharacterPick(char)}
                                 className="group relative bg-slate-900/80 border border-white/10 rounded-lg p-4 hover:border-amber-400/60 hover:bg-slate-800/80 transition-all text-left"
+                                style={{ borderColor: `${faction.colorPrimary}33` }}
                             >
                                 <div className="w-full h-32 flex items-center justify-center mb-3 overflow-hidden bg-black/30 rounded">
                                     <AttackFrameCanvas
@@ -2768,13 +2811,18 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                                 </div>
                                 <div className="text-center">
                                     <div className="font-semibold text-white group-hover:text-amber-300 transition-colors">{char.name}</div>
-                                    <div className="text-xs text-white/50 mt-1">
+                                    <div className="flex items-center justify-center gap-1.5 mt-1">
+                                        <img src={faction.emblemSrc} alt={faction.name} className="w-4 h-4 object-contain" style={{ filter: 'drop-shadow(0 0 2px rgba(0,0,0,0.8))' }} />
+                                        <span className="text-xs font-medium" style={{ color: faction.colorPrimary }}>{faction.name}</span>
+                                    </div>
+                                    <div className="text-xs text-white/50 mt-0.5">
                                         ATK {char.moveSet.baseDamage} · SPD {char.moveSet.runSpeed.toFixed(1)}
                                     </div>
                                 </div>
                                 <div className="absolute top-2 right-2 w-3 h-3 rounded-full" style={{ backgroundColor: char.color }} />
                             </button>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
             </div>
@@ -2812,6 +2860,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     <div className="p-4 border-b border-white/10 flex flex-wrap items-center gap-4 justify-between">
                         <div className="min-w-[260px]">
                             <div className="text-sm text-white/70 mb-1 flex items-center gap-2" style={{ color: p1Pick?.color }}>
+                                <img src={getFaction(p1Pick?.faction).emblemSrc} alt="" className="w-6 h-6 object-contain" style={{ filter: 'drop-shadow(0 0 3px rgba(0,0,0,0.9))' }} />
                                 P1: {p1Pick?.name}
                                 <span className="flex gap-1 ml-2">
                                     {Array.from({ length: STARTING_STOCKS }, (_, i) => (
@@ -2833,6 +2882,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                                     ))}
                                 </span>
                                 P2: {p2Pick?.name}
+                                <img src={getFaction(p2Pick?.faction).emblemSrc} alt="" className="w-6 h-6 object-contain" style={{ filter: 'drop-shadow(0 0 3px rgba(0,0,0,0.9))' }} />
                             </div>
                             <div className="grid grid-cols-10 gap-1">
                                 {Array.from({ length: 10 }, (_, idx) => (
