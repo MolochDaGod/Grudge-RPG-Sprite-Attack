@@ -2226,7 +2226,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             if (!isLocked && fighter.hp > 0) {
                 const direction = leftPressed === rightPressed ? 0 : (leftPressed ? -1 : 1);
                 if (direction !== 0) {
-                    const targetSpeed = fighter.moveSet.runSpeed * SPEED_SCALE * (currentlyGrounded ? GROUND_SPEED_MULT : AIR_SPEED_MULT);
+            const targetSpeed = (fighter.moveSet?.runSpeed ?? 5) * SPEED_SCALE * (currentlyGrounded ? GROUND_SPEED_MULT : AIR_SPEED_MULT);
                     const accel = currentlyGrounded ? GROUND_ACCEL : AIR_ACCEL;
                     vx = approach(vx, direction * targetSpeed, accel);
                 } else {
