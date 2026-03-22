@@ -464,6 +464,7 @@ function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet, stage: S
         dropThroughUntil: 0,
         moveVariant: "none",
         rescueUsed: false,
+        moveSet,
     };
 }
 
