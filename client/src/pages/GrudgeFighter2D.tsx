@@ -564,6 +564,10 @@ function circleIntersectsRect(
     return dx * dx + dy * dy <= circle.r * circle.r;
 }
 
+function axisOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): number {
+    return Math.min(aEnd, bEnd) - Math.max(aStart, bStart);
+}
+
 function setState(fighter: FighterRuntime, state: AnimationState, now: number): FighterRuntime {
     if (fighter.state === state) return fighter;
     return {
@@ -2021,13 +2025,20 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             }
 
             // NO clamping to arena edges — fighters can fall off!
-
-            // Body collision push — fighters can't overlap
-            const pushDist = 60; // minimum distance between centers
-            const dx = x - opponent.x;
-            const absDx = Math.abs(dx);
-            if (absDx < pushDist && absDx > 0.1 && Math.abs(y - opponent.y) < fighter.height * 0.8) {
-                const push = (pushDist - absDx) * 0.5 * Math.sign(dx);
+            // Body collision push — use the same boundaries as hurtBox detection
+            const projectedSelfBox = hurtBox({ ...fighter, x, y });
+            const opponentBox = hurtBox(opponent);
+            const overlapX = axisOverlap(
+                projectedSelfBox.x, projectedSelfBox.x + projectedSelfBox.w,
+                opponentBox.x, opponentBox.x + opponentBox.w
+            );
+            const overlapY = axisOverlap(
+                projectedSelfBox.y, projectedSelfBox.y + projectedSelfBox.h,
+                opponentBox.y, opponentBox.y + opponentBox.h
+            );
+            if (overlapX > 0 && overlapY > 0) {
+                const pushDir = x === opponent.x ? (fighter.id === "p1" ? -1 : 1) : Math.sign(x - opponent.x);
+                x += pushDir * (overlapX * 0.5 + 0.01);
                 x += push;
             }
 

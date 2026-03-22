@@ -26,6 +26,7 @@ Knight, Archer, Wizard, Orc, Dark Knight, Fire Knight, Silver Knight, Elf Ranger
 - **Up Special** (W+Q/E) — aerial dash strike
 - **Down Special** (S+Q/E) — counter stance
 - **Super Attack** (R) — Smash Bros-style cutscene when meter is full
+- **Collider Consistency** — character border detection and body push now use the same hurt-box boundary math for cleaner spacing and contact behavior
 
 ### Startup + Landing Presentation
 - Startup intro video auto-plays from `client/public/startup-intro.mp4` with a skip button.
