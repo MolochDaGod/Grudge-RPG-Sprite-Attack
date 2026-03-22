@@ -1,6 +1,6 @@
 # Grudge Smash
 
-A 2D sprite-based fighting game with 39 playable characters, AI opponents, online PvP, a stamina system, startup cinematic intro, and Smash Bros-style super attacks.
+A 2D sprite-based fighting game with 39 playable characters across 3 factions, AI opponents, online PvP, elliptical body collision, a stamina system, startup cinematic intro, and Smash Bros-style super attacks.
 
 **Play Now:** [grudge-rpg-sprite-attack.vercel.app](https://grudge-rpg-sprite-attack-grudgenexus.vercel.app)
 **Landing Page:** [molochdagod.github.io/Grudge-RPG-Sprite-Attack](https://molochdagod.github.io/Grudge-RPG-Sprite-Attack)
@@ -9,8 +9,13 @@ A 2D sprite-based fighting game with 39 playable characters, AI opponents, onlin
 
 ## Features
 
-### 39 playable characters
-Knight, Archer, Wizard, Orc, Dark Knight, Fire Knight, Silver Knight, Elf Ranger, Elf Mage, Barbarian, Necromancer, Pirate Captain, Fire Wizard, Lightning Mage, Crossbowman, Werebear, Werewolf, Arcane Archer, Leaf Ranger, Martial Hero, Dwarf Mage, Nightborne, Wind Hashashin, Water Priestess, Shardsoul Slayer, Loreon Knight, Elite Orc, Evil Wizard, Wanderer Magician, Human Ranger, and more. Each with unique sprites from GRUDA Wars, differentiated attack animations, move-specific VFX defaults, projectiles, and super attacks.
+### 39 Playable Characters across 3 Factions
+Each character belongs to a faction with its own emblem and color identity:
+- **Crusade** (blue/silver) -- Knight, Archer, Wizard, Swordsman, Priest, Knight Templar, Barbarian Ranger, Barbarian, Silver Knight, Pirate Captain, Crossbowman, Fire Knight, Human Ranger, Human Mage, Water Priestess, Martial Hero, Loreon Knight
+- **Legion** (red/black) -- Orc, Armored Orc, Elite Orc, Armored Skeleton, Dark Knight, Necromancer, Evil Wizard, Nightborne, Shardsoul Slayer
+- **Fabled** (green) -- Elf Ranger, Werebear, Werewolf, Fire Wizard, Lightning Mage, Leaf Ranger, Wind Hashashin, Dwarf Mage, Dwarf Ranger, Arcane Archer, Elf Mage, Wanderer Magician
+
+Faction emblems display on the character select grid and in the fight HUD.
 
 ### Combat System
 - **Melee 1** (Q) — default combo starter with body-part hitboxes (head 1.3x, body 1x, legs 0.8x)
@@ -26,7 +31,9 @@ Knight, Archer, Wizard, Orc, Dark Knight, Fire Knight, Silver Knight, Elf Ranger
 - **Up Special** (W+Q/E) — aerial dash strike
 - **Down Special** (S+Q/E) — counter stance
 - **Super Attack** (R) — Smash Bros-style cutscene when meter is full
-- **Collider Consistency** — character border detection and body push now use the same hurt-box boundary math for cleaner spacing and contact behavior
+- **Elliptical Body Collision** -- body collider is an ellipse that follows the character outline, naturally excluding weapon reach. Weapon hitbox is a separate rect active only during attack frames
+- **Bouncing Bomb** (E+S in air) -- down-angle projectile that bounces twice then detonates for 75% splash damage within 120px
+- **Debug Collision Overlay** (backtick key) -- toggle visible body ellipses (yellow), damage sub-zones (head/torso/legs dashed), weapon hitbox (pink, attack frames only), and foot anchor dots
 
 ### Startup + Landing Presentation
 - Startup intro video auto-plays from `client/public/startup-intro.mp4` with a skip button.
@@ -96,15 +103,17 @@ See [docs/GAME_SERVER_DEPLOYMENT.md](docs/GAME_SERVER_DEPLOYMENT.md) for server 
 ```
 client/
   src/
-    pages/GrudgeFighter2D.tsx    # Main fighter game
+    pages/GrudgeFighter2D.tsx    # Main fighter game (ellipse collision, factions, debug overlay)
     pages/ToonAdmin.tsx          # Character editor admin tool
     hooks/usePvP.ts              # Socket.io PvP client hook
-    lib/grudaRoster.ts           # 39-character roster data
+    lib/grudaRoster.ts           # 39-character roster data with faction assignments
+    lib/factions.ts              # Faction definitions (Crusade, Legion, Fabled)
     lib/charConfig.ts            # Character config persistence
   public/fighter2d/
     characters/                  # 39 character sprite folders
     effects/                     # Attack effect sprite strips
     projectiles/                 # Arrow, fireball, bullet, axe sprites
+    image/factions/              # Faction emblem PNGs (crusade, legion, fabled)
   public/startup-intro.mp4       # Startup cinematic
   public/landing-bg.jpg          # Landing page hero background
 server/

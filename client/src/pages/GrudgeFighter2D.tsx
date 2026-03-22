@@ -429,7 +429,7 @@ function pickMoveVfxId(move: MoveVariant, fighterKey: string, pool: Record<MoveV
     return ids[hashString(`${fighterKey}:${move}`) % ids.length];
 }
 
-function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet, stage: StageDefinition): FighterRuntime {
+function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet, stage: StageDefinition, scaleX = 1, scaleY = 1): FighterRuntime {
     const spawnX = id === "p1" ? stage.mainFloorX + 200 : stage.mainFloorX + stage.mainFloorW - 200;
     return {
         id,
@@ -437,8 +437,8 @@ function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet, stage: S
         y: stage.mainFloorY,
         vx: 0,
         vy: 0,
-        width: 80,
-        height: 160,
+        width: Math.round(80 * Math.max(0.6, Math.min(scaleX, 2.0))),
+        height: Math.round(160 * Math.max(0.6, Math.min(scaleY, 2.0))),
         facing: id === "p1" ? 1 : -1,
         hp: 200,
         maxHp: 200,
@@ -530,15 +530,67 @@ function getProjectileFloorY(projectile: { x: number; y: number }, stage: StageD
     return null;
 }
 
-// Body-part hitboxes for more precise collision
-function hurtBox(fighter: FighterRuntime) {
+// ─── Elliptical body collider (follows character outline) ────────
+interface BodyEllipse {
+    cx: number; cy: number; rx: number; ry: number;
+}
+
+/** Body ellipse: rx/ry sized to character's body — naturally excludes weapon reach */
+function bodyEllipse(fighter: FighterRuntime): BodyEllipse {
     return {
-        x: fighter.x - fighter.width / 2,
-        y: fighter.y - fighter.height,
-        w: fighter.width,
-        h: fighter.height,
+        cx: fighter.x,
+        cy: fighter.y - fighter.height / 2,
+        rx: fighter.width / 2,
+        ry: fighter.height / 2,
     };
 }
+
+function pointInEllipse(px: number, py: number, e: BodyEllipse): boolean {
+    const dx = (px - e.cx) / e.rx;
+    const dy = (py - e.cy) / e.ry;
+    return dx * dx + dy * dy <= 1;
+}
+
+/** Does a rect (weapon hitbox) intersect an ellipse (body)? */
+function rectIntersectsEllipse(
+    rect: { x: number; y: number; w: number; h: number },
+    e: BodyEllipse
+): boolean {
+    const closestX = clamp(e.cx, rect.x, rect.x + rect.w);
+    const closestY = clamp(e.cy, rect.y, rect.y + rect.h);
+    return pointInEllipse(closestX, closestY, e);
+}
+
+/** Does a circle (projectile) intersect an ellipse (body)? */
+function circleIntersectsEllipse(
+    circle: { x: number; y: number; r: number },
+    e: BodyEllipse
+): boolean {
+    // Scale space so ellipse becomes unit circle, then do circle test
+    const ndx = (circle.x - e.cx) / e.rx;
+    const ndy = (circle.y - e.cy) / e.ry;
+    const nr = circle.r / Math.min(e.rx, e.ry);
+    const dist = Math.sqrt(ndx * ndx + ndy * ndy);
+    return dist <= 1 + nr;
+}
+
+/** Do two body ellipses overlap? (for push resolution) */
+function ellipsesOverlap(a: BodyEllipse, b: BodyEllipse): boolean {
+    const ndx = (a.cx - b.cx) / (a.rx + b.rx);
+    const ndy = (a.cy - b.cy) / (a.ry + b.ry);
+    return ndx * ndx + ndy * ndy < 1;
+}
+
+/** Compute horizontal push needed to separate two overlapping ellipses */
+function ellipsePushX(a: BodyEllipse, b: BodyEllipse): number {
+    if (!ellipsesOverlap(a, b)) return 0;
+    // Approximate horizontal overlap
+    const combinedRx = a.rx + b.rx;
+    const dx = Math.abs(a.cx - b.cx);
+    return Math.max(0, combinedRx - dx);
+}
+
+// Damage zone sub-regions (inscribed within body ellipse)
 function headBox(fighter: FighterRuntime) {
     return { x: fighter.x - fighter.width * 0.3, y: fighter.y - fighter.height, w: fighter.width * 0.6, h: fighter.height * 0.25 };
 }
@@ -556,30 +608,15 @@ function intersectRect(
     return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
-function circleIntersectsRect(
-    circle: { x: number; y: number; r: number },
-    rect: { x: number; y: number; w: number; h: number }
-): boolean {
-    const closestX = clamp(circle.x, rect.x, rect.x + rect.w);
-    const closestY = clamp(circle.y, rect.y, rect.y + rect.h);
-    const dx = circle.x - closestX;
-    const dy = circle.y - closestY;
-    return dx * dx + dy * dy <= circle.r * circle.r;
-}
-
-function axisOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): number {
-    return Math.min(aEnd, bEnd) - Math.max(aStart, bStart);
-}
 
 function resolveFighterSeparation(a: FighterRuntime, b: FighterRuntime): { a: FighterRuntime; b: FighterRuntime } {
-    const aBox = hurtBox(a);
-    const bBox = hurtBox(b);
-    const overlapX = axisOverlap(aBox.x, aBox.x + aBox.w, bBox.x, bBox.x + bBox.w);
-    const overlapY = axisOverlap(aBox.y, aBox.y + aBox.h, bBox.y, bBox.y + bBox.h);
-    if (overlapX <= 0 || overlapY <= 0) return { a, b };
+    const ae = bodyEllipse(a);
+    const be = bodyEllipse(b);
+    const push = ellipsePushX(ae, be);
+    if (push <= 0) return { a, b };
 
     const dir = a.x === b.x ? (a.id === "p1" ? -1 : 1) : Math.sign(a.x - b.x);
-    const pushEach = overlapX * 0.5 + 0.01;
+    const pushEach = push * 0.5 + 0.01;
     return {
         a: { ...a, x: a.x + dir * pushEach },
         b: { ...b, x: b.x - dir * pushEach },
@@ -742,15 +779,15 @@ const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1484799745661734975/9F
 function postMatchResult(winner: string, loser: string, winnerChar: string, loserChar: string, duration: string, wasOnline: boolean) {
     const embed = {
         embeds: [{
-            title: "⚔️ Grudge Fighter — Match Result",
+            title: "GRUDGE FIGHTER -- Match Result",
             color: 0xb91c1c,
             fields: [
-                { name: "🏆 Winner", value: `**${winner}** (${winnerChar})`, inline: true },
-                { name: "💠 Defeated", value: `${loser} (${loserChar})`, inline: true },
-                { name: "⏱️ Duration", value: duration, inline: true },
-                { name: "🌐 Mode", value: wasOnline ? "Online PvP" : "vs AI", inline: true },
+                { name: "Winner", value: `**${winner}** (${winnerChar})`, inline: true },
+                { name: "Defeated", value: `${loser} (${loserChar})`, inline: true },
+                { name: "Duration", value: duration, inline: true },
+                { name: "Mode", value: wasOnline ? "Online PvP" : "vs AI", inline: true },
             ],
-            footer: { text: "Grudge Fighter · grudge-studio.com" },
+            footer: { text: "Grudge Fighter | grudge-studio.com" },
             timestamp: new Date().toISOString(),
         }],
     };
@@ -832,6 +869,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const activeEffectsRef = useRef<ActiveEffect[]>([]);
     const screenShakeRef = useRef({ intensity: 0, until: 0 });
     const hitFlashRef = useRef<{ target: FighterId; until: number } | null>(null);
+    const debugBoxesRef = useRef(false);
 
     // When PvP fight starts, set both picks from server data
     useEffect(() => {
@@ -916,8 +954,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         if (!p1Pick || !p2Pick) return;
         const stage = stageRef.current;
         worldRef.current = {
-            p1: createInitialFighter("p1", p1Pick.moveSet, stage),
-            p2: createInitialFighter("p2", p2Pick.moveSet, stage),
+            p1: createInitialFighter("p1", p1Pick.moveSet, stage, p1Pick.renderScaleX, p1Pick.renderScaleY),
+            p2: createInitialFighter("p2", p2Pick.moveSet, stage, p2Pick.renderScaleX, p2Pick.renderScaleY),
             projectiles: [],
             winner: null,
             startedAt: performance.now(),
@@ -1413,6 +1451,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
             const key = e.key.toLowerCase(); pressedKeysRef.current.add(key);
+            if (key === "`") { debugBoxesRef.current = !debugBoxesRef.current; return; }
             if (e.repeat) return;
 
             if (isOnline) {
@@ -1518,8 +1557,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         stageRef.current = selectedStage;
         const stage = stageRef.current;
         worldRef.current = {
-            p1: createInitialFighter("p1", p1Pick.moveSet, stage),
-            p2: createInitialFighter("p2", p2Pick.moveSet, stage),
+            p1: createInitialFighter("p1", p1Pick.moveSet, stage, p1Pick.renderScaleX, p1Pick.renderScaleY),
+            p2: createInitialFighter("p2", p2Pick.moveSet, stage, p2Pick.renderScaleX, p2Pick.renderScaleY),
             projectiles: [],
             winner: null,
             startedAt: performance.now(),
@@ -1734,36 +1773,79 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             ctx.save();
             ctx.globalAlpha = 0.25;
             if (stage.bgFeatures === 'castle') {
-                // Dark castle silhouettes
+                // Far castle silhouettes
                 for (let i = 0; i < 5; i++) {
                     const cx = parallaxX + 200 + i * 350;
                     const ch = 80 + (i % 3) * 50;
                     ctx.fillStyle = '#1a1a1a';
                     ctx.fillRect(cx, VIEWPORT_H - 200 + parallaxY - ch, 60, ch);
                     ctx.fillRect(cx - 10, VIEWPORT_H - 200 + parallaxY - ch - 20, 80, 20);
+                    // Turret caps
+                    ctx.fillRect(cx + 5, VIEWPORT_H - 200 + parallaxY - ch - 36, 14, 18);
+                    ctx.fillRect(cx + 38, VIEWPORT_H - 200 + parallaxY - ch - 30, 14, 14);
                 }
+                // Distant mountain range
+                ctx.fillStyle = '#0d140d';
+                ctx.beginPath();
+                ctx.moveTo(0, VIEWPORT_H - 160 + parallaxY * 0.5);
+                for (let mx = 0; mx <= VIEWPORT_W + 100; mx += 80) {
+                    ctx.lineTo(mx, VIEWPORT_H - 180 + parallaxY * 0.5 - Math.abs(Math.sin(mx * 0.005)) * 70);
+                }
+                ctx.lineTo(VIEWPORT_W + 100, VIEWPORT_H);
+                ctx.lineTo(0, VIEWPORT_H);
+                ctx.fill();
             } else if (stage.bgFeatures === 'ocean') {
-                // Waves
-                ctx.fillStyle = '#0a2040';
-                for (let wx = 0; wx < VIEWPORT_W + 100; wx += 30) {
-                    const wy = VIEWPORT_H - 80 + parallaxY + Math.sin((wx + now / 20) * 0.03) * 15;
-                    ctx.fillRect(wx + parallaxX * 0.1, wy, 28, VIEWPORT_H);
+                // Animated waves with depth layers
+                for (let layer = 0; layer < 3; layer++) {
+                    const alpha = 0.12 + layer * 0.06;
+                    const speed = 12 + layer * 8;
+                    const amp = 12 + layer * 6;
+                    const yBase = VIEWPORT_H - 60 - layer * 30 + parallaxY;
+                    ctx.fillStyle = `rgba(10, 32, 64, ${alpha})`;
+                    ctx.beginPath();
+                    ctx.moveTo(0, VIEWPORT_H);
+                    for (let wx = 0; wx <= VIEWPORT_W; wx += 8) {
+                        ctx.lineTo(wx, yBase + Math.sin((wx + now / speed) * 0.025 + layer) * amp);
+                    }
+                    ctx.lineTo(VIEWPORT_W, VIEWPORT_H);
+                    ctx.fill();
                 }
             } else if (stage.bgFeatures === 'lava') {
-                // Lava glow
-                ctx.fillStyle = `rgba(200, 50, 0, ${0.15 + 0.1 * Math.sin(now / 300)})`;
-                ctx.fillRect(0, VIEWPORT_H - 120, VIEWPORT_W, 120);
+                // Pulsing lava glow + rising heat distortion
+                const lavaAlpha = 0.15 + 0.1 * Math.sin(now / 300);
+                const lavaGrad = ctx.createLinearGradient(0, VIEWPORT_H - 140, 0, VIEWPORT_H);
+                lavaGrad.addColorStop(0, 'rgba(200, 50, 0, 0)');
+                lavaGrad.addColorStop(0.4, `rgba(200, 50, 0, ${lavaAlpha * 0.5})`);
+                lavaGrad.addColorStop(1, `rgba(255, 80, 0, ${lavaAlpha})`);
+                ctx.fillStyle = lavaGrad;
+                ctx.fillRect(0, VIEWPORT_H - 140, VIEWPORT_W, 140);
+                // Embers
+                for (let i = 0; i < 6; i++) {
+                    const ex = (now * 0.02 * (1 + i * 0.3) + i * 217) % VIEWPORT_W;
+                    const ey = VIEWPORT_H - 100 - ((now * 0.03 + i * 131) % 120);
+                    ctx.fillStyle = `rgba(255, ${120 + i * 20}, 0, ${0.4 + 0.3 * Math.sin(now / 80 + i)})`;
+                    ctx.fillRect(ex, ey, 2, 2);
+                }
             } else if (stage.bgFeatures === 'forest') {
-                // Tree silhouettes
-                ctx.fillStyle = '#0a1a0a';
-                for (let i = 0; i < 8; i++) {
-                    const tx = parallaxX + 100 + i * 200;
-                    const th = 100 + (i % 3) * 60;
-                    ctx.beginPath();
-                    ctx.moveTo(tx, VIEWPORT_H - 160 + parallaxY);
-                    ctx.lineTo(tx + 30, VIEWPORT_H - 160 + parallaxY - th);
-                    ctx.lineTo(tx + 60, VIEWPORT_H - 160 + parallaxY);
-                    ctx.fill();
+                // Layered tree silhouettes (far + near)
+                for (let layer = 0; layer < 2; layer++) {
+                    const tint = layer === 0 ? '#060d06' : '#0a1a0a';
+                    const count = layer === 0 ? 12 : 8;
+                    const baseY = layer === 0 ? VIEWPORT_H - 190 : VIEWPORT_H - 160;
+                    const px = parallaxX * (0.15 + layer * 0.15);
+                    ctx.fillStyle = tint;
+                    for (let i = 0; i < count; i++) {
+                        const tx = px + 50 + i * (VIEWPORT_W / count);
+                        const th = 80 + (i % 3) * 50 + layer * 30;
+                        // Trunk
+                        ctx.fillRect(tx + 12, baseY + parallaxY, 10, 30);
+                        // Canopy triangle
+                        ctx.beginPath();
+                        ctx.moveTo(tx, baseY + parallaxY);
+                        ctx.lineTo(tx + 17, baseY + parallaxY - th);
+                        ctx.lineTo(tx + 34, baseY + parallaxY);
+                        ctx.fill();
+                    }
                 }
             }
             ctx.restore();
@@ -1808,6 +1890,86 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             // Fighters
             drawFighter(world.p1, assets.p1);
             drawFighter(world.p2, assets.p2);
+
+            // Debug collision overlay (toggle with ` key)
+            if (debugBoxesRef.current) {
+                const drawEllipse = (e: BodyEllipse, color: string, label?: string) => {
+                    ctx.save();
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 2;
+                    ctx.globalAlpha = 0.6;
+                    ctx.beginPath();
+                    ctx.ellipse(e.cx, e.cy, e.rx, e.ry, 0, 0, Math.PI * 2);
+                    ctx.stroke();
+                    // Light fill
+                    ctx.globalAlpha = 0.08;
+                    ctx.fillStyle = color;
+                    ctx.fill();
+                    if (label) {
+                        ctx.globalAlpha = 0.6;
+                        ctx.fillStyle = color;
+                        ctx.font = 'bold 10px monospace';
+                        ctx.fillText(label, e.cx - e.rx + 2, e.cy - e.ry + 12);
+                    }
+                    ctx.restore();
+                };
+                const drawBox = (box: { x: number; y: number; w: number; h: number }, color: string, label?: string) => {
+                    ctx.save();
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 1;
+                    ctx.globalAlpha = 0.4;
+                    ctx.setLineDash([4, 3]);
+                    ctx.strokeRect(box.x, box.y, box.w, box.h);
+                    if (label) {
+                        ctx.fillStyle = color;
+                        ctx.globalAlpha = 0.4;
+                        ctx.font = '9px monospace';
+                        ctx.fillText(label, box.x + 2, box.y + 9);
+                    }
+                    ctx.restore();
+                };
+                for (const f of [world.p1, world.p2]) {
+                    // Body ellipse (main collision shape)
+                    drawEllipse(bodyEllipse(f), '#facc15', 'body');
+                    // Damage sub-zones (dashed)
+                    drawBox(headBox(f), '#ef4444', 'head');
+                    drawBox(bodyBox(f), '#22c55e', 'torso');
+                    drawBox(legsBox(f), '#3b82f6', 'legs');
+                    // Foot anchor
+                    ctx.save();
+                    ctx.fillStyle = '#fff';
+                    ctx.beginPath();
+                    ctx.arc(f.x, f.y, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+                // Weapon hitbox — only visible during attack frames
+                for (const f of [world.p1, world.p2]) {
+                    const isAttacking = f.state === 'attack' || f.state === 'attack2' || f.state === 'special';
+                    if (!isAttacking) continue;
+                    const charDef = f.id === 'p1' ? p1Pick : p2Pick;
+                    const variantReachMul = f.moveVariant === 'dash' ? 1.3 : f.moveVariant === 'upSpecial' ? 1.15 : 1;
+                    const atkReach = (charDef?.renderScaleX ?? 1) * 80 * variantReachMul;
+                    const weaponBox = {
+                        x: f.x + f.facing * 30 - (f.facing > 0 ? 0 : atkReach),
+                        y: f.y - f.height * 0.78,
+                        w: atkReach,
+                        h: f.height * 0.5,
+                    };
+                    ctx.save();
+                    ctx.strokeStyle = '#f472b6';
+                    ctx.lineWidth = 2;
+                    ctx.globalAlpha = 0.7;
+                    ctx.strokeRect(weaponBox.x, weaponBox.y, weaponBox.w, weaponBox.h);
+                    ctx.fillStyle = '#f472b6';
+                    ctx.globalAlpha = 0.12;
+                    ctx.fillRect(weaponBox.x, weaponBox.y, weaponBox.w, weaponBox.h);
+                    ctx.globalAlpha = 0.7;
+                    ctx.font = 'bold 10px monospace';
+                    ctx.fillText('WEAPON', weaponBox.x + 2, weaponBox.y + 11);
+                    ctx.restore();
+                }
+            }
 
             // Projectiles — use sprite images if available
             for (const projectile of world.projectiles) {
@@ -2043,20 +2205,13 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             }
 
             // NO clamping to arena edges — fighters can fall off!
-            // Body collision push — use the same boundaries as hurtBox detection
-            const projectedSelfBox = hurtBox({ ...fighter, x, y });
-            const opponentBox = hurtBox(opponent);
-            const overlapX = axisOverlap(
-                projectedSelfBox.x, projectedSelfBox.x + projectedSelfBox.w,
-                opponentBox.x, opponentBox.x + opponentBox.w
-            );
-            const overlapY = axisOverlap(
-                projectedSelfBox.y, projectedSelfBox.y + projectedSelfBox.h,
-                opponentBox.y, opponentBox.y + opponentBox.h
-            );
-            if (overlapX > 0 && overlapY > 0) {
+            // Body collision push — elliptical body collider
+            const selfEllipse = bodyEllipse({ ...fighter, x, y } as FighterRuntime);
+            const opponentEllipse = bodyEllipse(opponent);
+            const pushAmount = ellipsePushX(selfEllipse, opponentEllipse);
+            if (pushAmount > 0) {
                 const pushDir = x === opponent.x ? (fighter.id === "p1" ? -1 : 1) : Math.sign(x - opponent.x);
-                x += pushDir * (overlapX * 0.5 + 0.01);
+                x += pushDir * (pushAmount * 0.5 + 0.01);
             }
 
             const facing = opponent.x >= x ? 1 : -1;
@@ -2112,15 +2267,15 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 h: attacker.height * 0.5,
             };
 
-            // Check body-part hitboxes for damage zones
-            const headHit = intersectRect(hitBox, headBox(defender));
-            const bodyHit = intersectRect(hitBox, bodyBox(defender));
-            const legsHit = intersectRect(hitBox, legsBox(defender));
-            const anyHit = headHit || bodyHit || legsHit;
-
-            if (!anyHit) {
+            // Does the weapon hitbox reach the defender's body ellipse?
+            const defBody = bodyEllipse(defender);
+            if (!rectIntersectsEllipse(hitBox, defBody)) {
                 return { attacker: { ...attacker, attackHasConnected: true }, defender };
             }
+
+            // Determine which damage zone was hit (for multiplier)
+            const headHit = intersectRect(hitBox, headBox(defender));
+            const legsHit = !headHit && intersectRect(hitBox, legsBox(defender));
 
             // Dodge i-frames
             if (defender.invulnUntil > now) {
@@ -2179,7 +2334,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 w: attacker.width * 0.9,
                 h: attacker.height * 0.65,
             };
-            if (!intersectRect(hitBox, hurtBox(defender))) return { attacker, defender };
+            if (!rectIntersectsEllipse(hitBox, bodyEllipse(defender))) return { attacker, defender };
             if (defender.invulnUntil > now) return { attacker: { ...attacker, attackHasConnected: true }, defender };
 
             const result = applyDamage(defender, attacker, Math.round(attacker.moveSet.baseDamage * 1.1), now);
@@ -2347,10 +2502,10 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 }
 
                 const target = updated.owner === "p1" ? nextP2 : nextP1;
-                const targetBox = hurtBox(target);
-                const hit = circleIntersectsRect(
+                const targetBody = bodyEllipse(target);
+                const hit = circleIntersectsEllipse(
                     { x: updated.x, y: updated.y, r: updated.radius },
-                    targetBox
+                    targetBody
                 );
 
                 if (hit) {
@@ -2421,7 +2576,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     w: 72,
                     h: 92,
                 };
-                if (intersectRect(strikeBox, hurtBox(nextP2))) {
+                if (rectIntersectsEllipse(strikeBox, bodyEllipse(nextP2))) {
                     const result = applyDamage(nextP2, nextP1, nextP1.moveSet.upSpecialDamage, now);
                     nextP2 = result.target;
                     nextP1 = result.attacker;
@@ -2435,7 +2590,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     w: 72,
                     h: 92,
                 };
-                if (intersectRect(strikeBox, hurtBox(nextP1))) {
+                if (rectIntersectsEllipse(strikeBox, bodyEllipse(nextP1))) {
                     const result = applyDamage(nextP1, nextP2, nextP2.moveSet.upSpecialDamage, now);
                     nextP1 = result.target;
                     nextP2 = result.attacker;
