@@ -53,11 +53,15 @@ Intelligent AI that approaches, attacks in range, dodges projectiles, blocks, us
 ### Online PvP
 Socket.io room-based matchmaking with 4-character room codes. Input relay architecture — both clients run the same simulation.
 
-### ObjectStore VFX
-- Smear slash effects (smearH1-3, smearV1-3) from ObjectStore on every melee hit
-- Hit impact flash (hit_effect_1) at contact point
-- Fire breath effects for fire mages (fireBreath, fireBreathHit)
-- All VFX assignable per-character via ToonAdmin
+### 143+ VFX from ObjectStore
+Dynamically fetched from ObjectStore API at runtime (`/api/v1/effectSprites.json`):
+- 19 pixel magic effects (spellcasts, auras, debuffs up to 121 frames)
+- 15 color slash variants (red/blue/green/purple/orange in sm/md/lg)
+- 20+ retro impact effects (fire, lightning, ice, holy, dark, nature)
+- 5 bullet impact colors (320 frames each)
+- Custom effects: arcane bolt, flamestrike, frostbolt, healing wave, demon slashes
+- Local fallback sprites for offline play
+- All VFX assignable per-character per-action via ToonAdmin Pro
 
 ### Visual Effects
 - Per-character attack effect sprite sheets (Split Effects from GrudgeRPGAssets2d)
@@ -73,14 +77,18 @@ Socket.io room-based matchmaking with 4-character room codes. Input relay archit
 - Gamepad (A/X=attack, B=ranged, Y=jump, RT=dash, LT=block, RB=super)
 - Double-tap movement dodge: `AA` (left) and `DD` (right), plus `SS` for floating-platform drop-through
 
-### ToonAdmin — Character Editor
-Full admin tool at `#toonadmin` for editing all 39 characters:
-- Live animated sprite preview with scale control (1x–8x)
-- Remap any animation to any game action (Q attack, E attack, block, cast, etc.)
-- Adjust animation speed (hold frames) and loop behavior
-- Edit ATK, SPD, Super DMG stats
-- Save to localStorage (game reads overrides on load)
-- Import/Export JSON configs
+### ToonAdmin Pro -- Sprite Animation Studio
+Professional editor at `#toonadmin` for all 39 characters:
+- **Canvas Stage** -- 800x500 Canvas 2D with grid floor, main platform, floating platform
+- **Live Collision Overlay** -- body ellipse, head/torso/legs damage zones, weapon hitbox (matches game engine exactly)
+- **Frame-by-Frame Scrubber** -- clickable timeline, arrow keys step, red playhead, speed 0.25x/0.5x/1x/2x
+- **Onion Skinning** -- ghost previous (red) and next (blue) frames for animation continuity
+- **VFX Browser** -- searchable grid of 143+ effects with category filter tabs
+- **Live VFX Preview** -- assigned hit/swing VFX play on canvas during attack previews
+- **Per-Action VFX Assignment** -- hit VFX + swing VFX dropdowns for attack/special/cast/block
+- **Server Persistence** -- saves to server + localStorage, sync status indicator
+- Remap animations, adjust hold/loop, edit ATK/SPD/Super stats
+- Import/Export JSON configs, faction badge per character
 
 ## Tech Stack
 
@@ -105,12 +113,13 @@ See [docs/GAME_SERVER_DEPLOYMENT.md](docs/GAME_SERVER_DEPLOYMENT.md) for server 
 client/
   src/
     pages/GrudgeFighter2D.tsx    # Main fighter game (ellipse collision, factions, debug overlay)
-    pages/ToonAdmin.tsx          # Character editor admin tool
+    pages/ToonAdmin.tsx          # ToonAdmin Pro sprite animation studio
     hooks/usePvP.ts              # Socket.io PvP client hook
     lib/grudaRoster.ts           # 39-character roster data with faction assignments
     lib/factions.ts              # Faction definitions (Crusade, Legion, Fabled)
     lib/gameSounds.ts            # Howler.js sound system (20 SFX types, pooled, pitch-randomized)
-    lib/charConfig.ts            # Character config persistence
+    lib/vfxLibrary.ts            # Dynamic VFX library (143+ from ObjectStore API)
+    lib/charConfig.ts            # Character config persistence (server + localStorage)
   public/fighter2d/
     characters/                  # 39 character sprite folders
     effects/                     # Attack effect sprite strips
@@ -122,7 +131,9 @@ client/
 server/
   pvp.ts                         # Socket.io PvP room server
   index.ts                       # Express entry point
-  routes.ts                      # API routes
+  routes.ts                      # API routes + char-config persistence
+data/
+  char-configs.json              # Server-persisted character editor configs
 docs/
   index.html                     # GitHub Pages landing page
   editor.html                    # Static character editor

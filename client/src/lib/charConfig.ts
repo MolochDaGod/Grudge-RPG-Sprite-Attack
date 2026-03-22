@@ -1,7 +1,8 @@
 // Character configuration overrides — shared between ToonAdmin and the fighter game
-// Stored in localStorage so edits persist across sessions and deployments
+// Saves to server first, falls back to localStorage when offline
 
 const STORAGE_KEY = "grudge-char-overrides";
+const API_BASE = "/api/char-config";
 
 // Game action slots that can be remapped to different animation files
 export const ACTION_SLOTS = [
@@ -59,6 +60,37 @@ export function saveOverrides(overrides: AllOverrides): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
 }
 
+/** Load overrides from server, merge with local, return combined */
+export async function loadOverridesFromServer(): Promise<AllOverrides> {
+  try {
+    const res = await fetch(API_BASE);
+    if (res.ok) {
+      const server = await res.json();
+      // Merge: server takes priority, local fills gaps
+      const local = loadOverrides();
+      const merged = { ...local, ...server };
+      saveOverrides(merged);
+      return merged;
+    }
+  } catch {}
+  return loadOverrides();
+}
+
+/** Save overrides to server + localStorage */
+export async function saveOverridesToServer(overrides: AllOverrides): Promise<boolean> {
+  saveOverrides(overrides);
+  try {
+    const res = await fetch(API_BASE, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(overrides),
+    });
+    return res.ok;
+  } catch {
+    return false; // saved locally, server unavailable
+  }
+}
+
 export function getCharOverrides(charId: string): CharOverrides | null {
   const all = loadOverrides();
   return all[charId] ?? null;
@@ -68,12 +100,19 @@ export function setCharOverrides(charId: string, overrides: CharOverrides): void
   const all = loadOverrides();
   all[charId] = overrides;
   saveOverrides(all);
+  // Fire-and-forget server sync
+  fetch(`${API_BASE}/${charId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(overrides),
+  }).catch(() => {});
 }
 
 export function deleteCharOverrides(charId: string): void {
   const all = loadOverrides();
   delete all[charId];
   saveOverrides(all);
+  fetch(`${API_BASE}/${charId}`, { method: "DELETE" }).catch(() => {});
 }
 
 export function exportAllOverrides(): string {
@@ -85,6 +124,8 @@ export function importOverrides(json: string): boolean {
     const parsed = JSON.parse(json);
     if (typeof parsed === "object" && parsed !== null) {
       saveOverrides(parsed);
+      // Sync to server
+      saveOverridesToServer(parsed).catch(() => {});
       return true;
     }
     return false;

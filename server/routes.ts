@@ -1205,6 +1205,73 @@ public class TethicalSprites : MonoBehaviour {
     });
   });
 
+  // ========== CHARACTER CONFIG PERSISTENCE ==========
+  // File-based JSON storage for character editor overrides
+  const fs = await import("fs");
+  const path = await import("path");
+  const CHAR_CONFIG_PATH = path.join(process.cwd(), "data", "char-configs.json");
+
+  function ensureDataDir() {
+    const dir = path.dirname(CHAR_CONFIG_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  }
+
+  function readAllConfigs(): Record<string, any> {
+    try {
+      ensureDataDir();
+      if (!fs.existsSync(CHAR_CONFIG_PATH)) return {};
+      return JSON.parse(fs.readFileSync(CHAR_CONFIG_PATH, "utf-8"));
+    } catch { return {}; }
+  }
+
+  function writeAllConfigs(configs: Record<string, any>) {
+    ensureDataDir();
+    fs.writeFileSync(CHAR_CONFIG_PATH, JSON.stringify(configs, null, 2));
+  }
+
+  // Get all character configs
+  app.get("/api/char-config", (_req, res) => {
+    res.json(readAllConfigs());
+  });
+
+  // Get single character config
+  app.get("/api/char-config/:charId", (req, res) => {
+    const all = readAllConfigs();
+    const config = all[req.params.charId];
+    if (!config) return res.status(404).json({ error: "No config for this character" });
+    res.json(config);
+  });
+
+  // Save single character config
+  app.post("/api/char-config/:charId", (req, res) => {
+    try {
+      const all = readAllConfigs();
+      all[req.params.charId] = req.body;
+      writeAllConfigs(all);
+      res.json({ success: true, charId: req.params.charId });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to save config" });
+    }
+  });
+
+  // Save all configs at once (bulk)
+  app.post("/api/char-config", (req, res) => {
+    try {
+      writeAllConfigs(req.body);
+      res.json({ success: true, count: Object.keys(req.body).length });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to save configs" });
+    }
+  });
+
+  // Delete single character config
+  app.delete("/api/char-config/:charId", (req, res) => {
+    const all = readAllConfigs();
+    delete all[req.params.charId];
+    writeAllConfigs(all);
+    res.json({ success: true });
+  });
+
   // ========== AI CHAT ROUTES ==========
   registerChatRoutes(app);
 

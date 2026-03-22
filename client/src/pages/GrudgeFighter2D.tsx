@@ -2772,77 +2772,313 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const [demoP1] = useState(() => CHARACTER_ROSTER[Math.floor(Math.random() * CHARACTER_ROSTER.length)]);
     const [demoP2] = useState(() => CHARACTER_ROSTER[Math.floor(Math.random() * CHARACTER_ROSTER.length)]);
 
+    // ─── AI vs AI demo battle canvas for menu background ─────────
+    const demoBattleCanvasRef = useRef<HTMLCanvasElement>(null);
+    const demoBattleAnimRef = useRef<number | null>(null);
+
+    useEffect(() => {
+        if (selectPhase !== "mode") {
+            if (demoBattleAnimRef.current !== null) {
+                cancelAnimationFrame(demoBattleAnimRef.current);
+                demoBattleAnimRef.current = null;
+            }
+            return;
+        }
+        const canvas = demoBattleCanvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        const W = 960;
+        const H = 540;
+        canvas.width = W;
+        canvas.height = H;
+
+        // Load demo sprites
+        interface DemoFighter {
+            sprites: { idle: HTMLImageElement | null; attack: HTMLImageElement | null; hurt: HTMLImageElement | null; run: HTMLImageElement | null };
+            idleFrames: number; attackFrames: number; hurtFrames: number; runFrames: number;
+            x: number; facing: 1 | -1;
+            state: "idle" | "run" | "attack" | "hurt";
+            frame: number; tick: number; stateTimer: number;
+        }
+
+        const fighters: [DemoFighter, DemoFighter] = [
+            { sprites: { idle: null, attack: null, hurt: null, run: null }, idleFrames: demoP1.sprites.idle.frames, attackFrames: demoP1.sprites.attack.frames, hurtFrames: demoP1.sprites.takeHit.frames, runFrames: demoP1.sprites.run.frames, x: 200, facing: 1, state: "idle", frame: 0, tick: 0, stateTimer: 0 },
+            { sprites: { idle: null, attack: null, hurt: null, run: null }, idleFrames: demoP2.sprites.idle.frames, attackFrames: demoP2.sprites.attack.frames, hurtFrames: demoP2.sprites.takeHit.frames, runFrames: demoP2.sprites.run.frames, x: 760, facing: -1, state: "idle", frame: 0, tick: 0, stateTimer: 0 },
+        ];
+
+        // Particles for impact effects
+        interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number }
+        const particles: Particle[] = [];
+
+        const loadImg = (src: string): Promise<HTMLImageElement> => new Promise((res) => {
+            const img = new Image();
+            img.onload = () => res(img);
+            img.onerror = () => res(img);
+            img.src = src;
+        });
+
+        let disposed = false;
+        Promise.all([
+            loadImg(demoP1.sprites.idle.src), loadImg(demoP1.sprites.attack.src),
+            loadImg(demoP1.sprites.takeHit.src), loadImg(demoP1.sprites.run.src),
+            loadImg(demoP2.sprites.idle.src), loadImg(demoP2.sprites.attack.src),
+            loadImg(demoP2.sprites.takeHit.src), loadImg(demoP2.sprites.run.src),
+        ]).then(([p1Idle, p1Atk, p1Hurt, p1Run, p2Idle, p2Atk, p2Hurt, p2Run]) => {
+            if (disposed) return;
+            fighters[0].sprites = { idle: p1Idle, attack: p1Atk, hurt: p1Hurt, run: p1Run };
+            fighters[1].sprites = { idle: p2Idle, attack: p2Atk, hurt: p2Hurt, run: p2Run };
+        });
+
+        const GROUND_Y = 420;
+        const AI_THINK_MS = 1800; // AI action cycle
+        let lastAiSwitch = 0;
+        let aiTurn = 0; // alternates which fighter attacks
+
+        const spawnHitParticles = (x: number, y: number, color: string) => {
+            for (let i = 0; i < 8; i++) {
+                particles.push({
+                    x, y: y - 80,
+                    vx: (Math.random() - 0.5) * 6,
+                    vy: (Math.random() - 0.8) * 4,
+                    life: 1, maxLife: 0.5 + Math.random() * 0.5,
+                    color, size: 2 + Math.random() * 3,
+                });
+            }
+        };
+
+        const loop = (now: number) => {
+            if (disposed) return;
+            ctx.clearRect(0, 0, W, H);
+
+            // Background gradient
+            const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+            bgGrad.addColorStop(0, '#050508');
+            bgGrad.addColorStop(1, '#0c0a14');
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(0, 0, W, H);
+
+            // Subtle ground line
+            ctx.fillStyle = 'rgba(185,28,28,0.15)';
+            ctx.fillRect(0, GROUND_Y + 10, W, 2);
+
+            // AI state machine
+            if (now - lastAiSwitch > AI_THINK_MS) {
+                lastAiSwitch = now;
+                const attacker = fighters[aiTurn % 2];
+                const defender = fighters[(aiTurn + 1) % 2];
+                const dist = Math.abs(attacker.x - defender.x);
+
+                if (dist > 200) {
+                    // Run toward opponent
+                    attacker.state = "run";
+                    attacker.frame = 0;
+                    attacker.tick = 0;
+                    attacker.stateTimer = now;
+                } else {
+                    // Attack
+                    attacker.state = "attack";
+                    attacker.frame = 0;
+                    attacker.tick = 0;
+                    attacker.stateTimer = now;
+                    // Defender gets hit after short delay
+                    setTimeout(() => {
+                        if (disposed) return;
+                        defender.state = "hurt";
+                        defender.frame = 0;
+                        defender.tick = 0;
+                        defender.stateTimer = performance.now();
+                        spawnHitParticles(defender.x, GROUND_Y, aiTurn % 2 === 0 ? '#ff4444' : '#aa44ff');
+                    }, 300);
+                }
+                aiTurn++;
+            }
+
+            // Update & draw fighters
+            ctx.imageSmoothingEnabled = false;
+            for (const f of fighters) {
+                // State transitions
+                const elapsed = now - f.stateTimer;
+                if (f.state === "run") {
+                    f.x += f.facing * 1.8;
+                    if (elapsed > 800) { f.state = "idle"; f.frame = 0; f.tick = 0; }
+                } else if (f.state === "attack" && elapsed > 600) {
+                    f.state = "idle"; f.frame = 0; f.tick = 0;
+                } else if (f.state === "hurt" && elapsed > 500) {
+                    f.state = "idle"; f.frame = 0; f.tick = 0;
+                }
+
+                // Auto-face opponent
+                const other = f === fighters[0] ? fighters[1] : fighters[0];
+                f.facing = other.x > f.x ? 1 : -1;
+
+                // Get current sprite
+                const spriteImg = f.state === "attack" ? f.sprites.attack
+                    : f.state === "hurt" ? f.sprites.hurt
+                    : f.state === "run" ? f.sprites.run
+                    : f.sprites.idle;
+                const numFrames = f.state === "attack" ? f.attackFrames
+                    : f.state === "hurt" ? f.hurtFrames
+                    : f.state === "run" ? f.runFrames
+                    : f.idleFrames;
+
+                if (spriteImg && spriteImg.complete && spriteImg.naturalWidth > 0) {
+                    const fw = spriteImg.width / numFrames;
+                    const fh = spriteImg.height;
+                    const scale = 240 / fh;
+                    const dw = fw * scale;
+                    const dh = fh * scale;
+
+                    // Advance frame
+                    f.tick++;
+                    if (f.tick >= 4) {
+                        f.tick = 0;
+                        f.frame = (f.frame + 1) % numFrames;
+                    }
+
+                    ctx.save();
+                    if (f.facing < 0) {
+                        ctx.translate(f.x, 0);
+                        ctx.scale(-1, 1);
+                        ctx.translate(-f.x, 0);
+                    }
+
+                    // Glow under fighter
+                    const glowColor = f === fighters[0] ? 'rgba(185,28,28,0.3)' : 'rgba(109,40,217,0.3)';
+                    ctx.shadowColor = glowColor;
+                    ctx.shadowBlur = 30;
+                    ctx.drawImage(spriteImg, f.frame * fw, 0, fw, fh, f.x - dw / 2, GROUND_Y - dh + 10, dw, dh);
+                    ctx.shadowBlur = 0;
+                    ctx.restore();
+                }
+            }
+
+            // Update & draw particles
+            const dt = 1 / 60;
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.15;
+                p.life -= dt / p.maxLife;
+                if (p.life <= 0) { particles.splice(i, 1); continue; }
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+            }
+            ctx.globalAlpha = 1;
+
+            // Ambient floating embers
+            for (let i = 0; i < 6; i++) {
+                const ex = ((now * 0.015 + i * 163) % W);
+                const ey = ((now * 0.02 + i * 97) % H);
+                const alpha = 0.2 + 0.15 * Math.sin(now / 500 + i);
+                ctx.fillStyle = `rgba(185,28,28,${alpha})`;
+                ctx.fillRect(ex, ey, 2, 2);
+            }
+
+            demoBattleAnimRef.current = requestAnimationFrame(loop);
+        };
+
+        demoBattleAnimRef.current = requestAnimationFrame(loop);
+
+        return () => {
+            disposed = true;
+            if (demoBattleAnimRef.current !== null) {
+                cancelAnimationFrame(demoBattleAnimRef.current);
+                demoBattleAnimRef.current = null;
+            }
+        };
+    }, [selectPhase, demoP1, demoP2]);
+
     // ─── MODE SELECT ─────────────────────────────────────────────
     if (selectPhase === "mode") {
         return (
             <div className="min-h-screen text-white relative overflow-hidden" style={{ background: '#000' }}>
+                {/* Animated AI vs AI battle canvas background */}
+                <canvas
+                    ref={demoBattleCanvasRef}
+                    className="absolute inset-0 w-full h-full object-cover opacity-40 pointer-events-none"
+                    style={{ imageRendering: 'pixelated' }}
+                />
+
                 {/* Dark vignette overlay */}
                 <div className="absolute inset-0" style={{
-                    background: 'radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.8) 100%)',
+                    background: 'radial-gradient(ellipse at center, transparent 20%, rgba(0,0,0,0.85) 100%)',
                 }} />
 
-                {/* Animated battle sprites in background */}
-                <div className="absolute inset-0 flex items-center justify-center opacity-20 pointer-events-none">
-                    <div className="relative" style={{ width: 800, height: 400 }}>
-                        {/* P1 sprite - left side, facing right */}
-                        <img src={demoP1.sprites.attack.src} alt="" className="absolute" style={{
-                            left: 80, bottom: 40, height: 200, imageRendering: 'pixelated', filter: 'drop-shadow(0 0 20px rgba(185,28,28,0.5))',
-                        }} />
-                        {/* VS spark */}
-                        <div className="absolute text-6xl font-black" style={{
-                            left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
-                            color: '#b91c1c', textShadow: '0 0 40px rgba(185,28,28,0.8)', fontFamily: 'Georgia, serif',
-                        }}>VS</div>
-                        {/* P2 sprite - right side, facing left, flipped */}
-                        <img src={demoP2.sprites.attack.src} alt="" className="absolute" style={{
-                            right: 80, bottom: 40, height: 200, imageRendering: 'pixelated', transform: 'scaleX(-1)',
-                            filter: 'drop-shadow(0 0 20px rgba(109,40,217,0.5))',
-                        }} />
-                    </div>
-                </div>
+                {/* Animated bottom glow bar */}
+                <div className="absolute bottom-0 left-0 right-0 h-1" style={{
+                    background: 'linear-gradient(90deg, transparent, #b91c1c, #6d28d9, transparent)',
+                    opacity: 0.6,
+                }} />
 
                 <div className="relative z-10 max-w-[520px] mx-auto pt-12 px-6 pb-8">
                     {/* Logo + Title */}
-                    <div className="text-center mb-8">
-                        <img src="/favicon.png" alt="Grudge" className="w-20 h-20 mx-auto mb-3 rounded-full" style={{
-                            border: '2px solid rgba(185,28,28,0.5)',
-                            boxShadow: '0 0 40px rgba(185,28,28,0.3)',
+                    <div className="text-center mb-8" style={{ animation: 'menu-float 4s ease-in-out infinite' }}>
+                        <img src="/favicon.png" alt="Grudge" className="w-24 h-24 mx-auto mb-3 rounded-full" style={{
+                            border: '2px solid rgba(185,28,28,0.6)',
+                            boxShadow: '0 0 40px rgba(185,28,28,0.4), 0 0 80px rgba(185,28,28,0.15)',
                         }} />
-                        <h1 className="text-4xl font-black tracking-wider" style={{
+                        <h1 className="text-5xl font-black tracking-wider" style={{
                             fontFamily: 'Georgia, serif',
-                            background: 'linear-gradient(180deg, #fff 0%, #b91c1c 100%)',
+                            background: 'linear-gradient(180deg, #fff 0%, #ff4444 50%, #b91c1c 100%)',
                             WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-                            filter: 'drop-shadow(0 0 20px rgba(185,28,28,0.4))',
+                            animation: 'title-flicker 3s ease-in-out infinite',
                         }}>GRUDGE FIGHTER</h1>
-                        <p className="text-white/25 text-xs mt-1 tracking-[0.4em] uppercase">39 Warriors · No Mercy</p>
-                        <p className="text-white/15 text-[10px] mt-0.5">{demoP1.name} vs {demoP2.name}</p>
+                        <p className="text-white/30 text-xs mt-2 tracking-[0.5em] uppercase">39 Warriors · No Mercy</p>
+                        <p className="text-white/20 text-[10px] mt-1 italic">{demoP1.name} vs {demoP2.name} — AI Battle in Progress</p>
                     </div>
 
-                    {/* Main action buttons with sprite thumbnails */}
-                    <div className="space-y-3">
+                    {/* Main action buttons — awesome animated */}
+                    <div className="space-y-4">
+                        {/* VS AI Button */}
                         <button onClick={() => { setVsAI(true); setSelectPhase("p1"); }}
-                            className="w-full flex items-center gap-4 py-3 px-5 rounded-lg font-bold text-lg tracking-wider transition-all hover:scale-[1.02]"
-                            style={{ background: 'linear-gradient(135deg, #b91c1c, #7f1d1d)', boxShadow: '0 4px 24px rgba(185,28,28,0.35)' }}>
-                            <img src={demoP1.sprites.idle.src} alt="" className="w-10 h-10 object-contain" style={{ imageRendering: 'pixelated' }} />
-                            <span>VS AI</span>
+                            className="grudge-menu-btn-red w-full flex items-center gap-4 py-4 px-6 rounded-xl font-black text-xl tracking-widest transition-all duration-200 hover:scale-[1.03] active:scale-[0.98] cursor-pointer"
+                            style={{
+                                background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 40%, #7f1d1d 100%)',
+                                border: '1px solid rgba(255,100,100,0.3)',
+                            }}>
+                            <div className="relative w-12 h-12 flex-shrink-0">
+                                <img src={demoP1.sprites.idle.src} alt="" className="w-full h-full object-contain" style={{ imageRendering: 'pixelated' }} />
+                                <div className="absolute inset-0 rounded-full" style={{ boxShadow: '0 0 12px rgba(185,28,28,0.6)' }} />
+                            </div>
+                            <div className="flex flex-col items-start relative z-10">
+                                <span className="leading-tight">VS AI</span>
+                                <span className="text-[10px] font-normal tracking-wider text-red-200/60 uppercase">Single Player Battle</span>
+                            </div>
+                            <Crosshair className="w-5 h-5 ml-auto opacity-40" />
                         </button>
+
+                        {/* ONLINE PVP Button */}
                         <button onClick={() => { pvp.connect(); setSelectPhase("lobby"); }}
-                            className="w-full flex items-center gap-4 py-3 px-5 rounded-lg font-bold text-lg tracking-wider transition-all hover:scale-[1.02]"
-                            style={{ background: 'linear-gradient(135deg, #6d28d9, #4c1d95)', boxShadow: '0 4px 24px rgba(109,40,217,0.35)' }}>
-                            <img src={demoP2.sprites.idle.src} alt="" className="w-10 h-10 object-contain" style={{ imageRendering: 'pixelated' }} />
-                            <span>ONLINE PVP</span>
+                            className="grudge-menu-btn-purple w-full flex items-center gap-4 py-4 px-6 rounded-xl font-black text-xl tracking-widest transition-all duration-200 hover:scale-[1.03] active:scale-[0.98] cursor-pointer"
+                            style={{
+                                background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 40%, #4c1d95 100%)',
+                                border: '1px solid rgba(160,100,255,0.3)',
+                            }}>
+                            <div className="relative w-12 h-12 flex-shrink-0">
+                                <img src={demoP2.sprites.idle.src} alt="" className="w-full h-full object-contain" style={{ imageRendering: 'pixelated', transform: 'scaleX(-1)' }} />
+                                <div className="absolute inset-0 rounded-full" style={{ boxShadow: '0 0 12px rgba(109,40,217,0.6)' }} />
+                            </div>
+                            <div className="flex flex-col items-start relative z-10">
+                                <span className="leading-tight">ONLINE PVP</span>
+                                <span className="text-[10px] font-normal tracking-wider text-purple-200/60 uppercase">Challenge Real Players</span>
+                            </div>
+                            <Globe className="w-5 h-5 ml-auto opacity-40" />
                         </button>
                     </div>
 
                     {/* Tools row */}
-                    <div className="grid grid-cols-2 gap-2 mt-4">
+                    <div className="grid grid-cols-2 gap-2 mt-5">
                         <button onClick={() => { window.location.hash = 'toonadmin'; }}
-                            className="flex items-center gap-2 justify-center py-2.5 rounded-lg text-sm font-semibold border border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10 transition-all text-amber-300">
+                            className="flex items-center gap-2 justify-center py-2.5 rounded-lg text-sm font-semibold border border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/15 hover:border-amber-500/40 transition-all text-amber-300">
                             <img src="/fighter2d/effects/slash_arc.png" alt="" className="w-5 h-5 object-contain" style={{ imageRendering: 'pixelated' }} />
                             Character Editor
                         </button>
                         <a href="https://molochdagod.github.io/Grudge-RPG-Sprite-Attack/" target="_blank"
-                            className="flex items-center gap-2 justify-center py-2.5 rounded-lg text-sm font-semibold border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-center">
+                            className="flex items-center gap-2 justify-center py-2.5 rounded-lg text-sm font-semibold border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all text-center">
                             <img src="/favicon.png" alt="" className="w-5 h-5 rounded-full" />
                             Landing Page
                         </a>
