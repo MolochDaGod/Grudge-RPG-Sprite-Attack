@@ -3,17 +3,33 @@ import { GRUDA_ROSTER, type GrudaCharDef } from "@/lib/grudaRoster";
 import { ACTION_SLOTS, type ActionSlotKey, type CharOverrides, loadOverrides, setCharOverrides, deleteCharOverrides, exportAllOverrides, importOverrides, saveOverridesToServer } from "@/lib/charConfig";
 import { getAllVfx, getVfxCategories, searchVfx, preloadVfx, getVfxById, getVfxImage, drawVfxFrame, type VfxDef } from "@/lib/vfxLibrary";
 import { getFaction } from "@/lib/factions";
+import { getDefaultVfx } from "@/lib/defaultVfx";
 
 // ─── Helpers ─────────────────────────────────────────────────────
 function getCharAnims(char: GrudaCharDef): { key: string; file: string; frames: number }[] {
   const anims: { key: string; file: string; frames: number }[] = [];
   const add = (key: string, val?: [string, number]) => { if (val) anims.push({ key, file: val[0], frames: val[1] }); };
-  add("idle", char.idle); add("walk", char.walk); add("attack", char.attack); add("fall", char.fall);
+  add("idle", char.idle); add("walk", char.walk); add("jump", char.jump); add("fall", char.fall);
+  add("attack", char.attack); add("attack2", char.attack2);
+  add("special", char.special); add("cast", char.cast);
+  add("block", char.block); add("roll", char.roll);
   add("hurt", char.hurt); add("death", char.death);
-  add("attack2", char.attack2); add("block", char.block); add("jump", char.jump);
-  add("cast", char.cast); add("special", char.special); add("roll", char.roll);
   return anims;
 }
+
+const SLOT_GROUPS = ["movement", "melee", "special", "defense"] as const;
+const GROUP_LABELS: Record<string, string> = {
+  movement: "MOVEMENT",
+  melee: "MELEE / COMBOS",
+  special: "SPECIALS",
+  defense: "DEFENSE",
+};
+const GROUP_COLORS: Record<string, string> = {
+  movement: "#60a5fa",
+  melee: "#f87171",
+  special: "#a78bfa",
+  defense: "#4ade80",
+};
 
 const ALPHA_THRESHOLD = 8;
 const paddingCache = new Map<string, number>();
@@ -506,49 +522,96 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
             <button onClick={resetChar} className="text-[10px] text-red-400 hover:text-red-300">Reset</button>
           </div>
 
-          {ACTION_SLOTS.map(slot => {
-            const current = getSlotAnim(slot.key);
-            const isOv = !!charOv.actions[slot.key];
-            return (
-              <div key={slot.key} className="border-b border-white/5 px-2 py-2">
-                <div className="flex items-center justify-between mb-1">
-                  <span className={`text-[10px] font-bold uppercase ${slot.required ? "text-white/70" : "text-white/30"}`}>{slot.label}</span>
-                  {isOv && <span className="text-[8px] text-red-400">mod</span>}
-                </div>
-                <select value={current?.file ?? ""} onChange={e => { const a = charAnims.find(x => x.file === e.target.value); if (a) setSlotAnim(slot.key, a.file, a.frames); }}
-                  className="w-full bg-zinc-900 border border-white/10 rounded px-1.5 py-1 text-[10px] text-white/70 mb-1">
-                  <option value="">-- none --</option>
-                  {charAnims.map(a => <option key={a.file} value={a.file}>{a.key} ({a.file}, {a.frames}f)</option>)}
-                </select>
-                {current && (
-                  <div className="flex items-center gap-2 text-[9px]">
-                    <label className="flex items-center gap-0.5 text-white/30">
-                      Hold <input type="number" min={1} max={20} value={current.hold} onChange={e => setSlotField(slot.key, "hold", parseInt(e.target.value) || 5)} className="w-8 bg-zinc-800 border border-white/10 rounded px-1 py-0.5 text-white/60 text-center" />
-                    </label>
-                    <label className="flex items-center gap-0.5 text-white/30 cursor-pointer">
-                      <input type="checkbox" checked={current.loop} onChange={e => setSlotField(slot.key, "loop", e.target.checked)} className="accent-red-500" /> Loop
-                    </label>
-                    <button onClick={() => { setPreviewAnimKey(slot.key); frameRef.current = 0; }} className="ml-auto text-red-400 hover:text-red-300">Preview</button>
-                  </div>
-                )}
-                {/* VFX assignment for attack slots */}
-                {["attack", "attack2", "special", "cast", "block"].includes(slot.key) && current && (
-                  <div className="mt-1 flex gap-1">
-                    <select value={charOv.actions[slot.key]?.hitVfx ?? ""} onChange={e => setSlotField(slot.key, "hitVfx", e.target.value || undefined)}
-                      className="flex-1 bg-zinc-900 border border-white/10 rounded px-1 py-0.5 text-[9px] text-white/50">
-                      <option value="">-- hit VFX --</option>
-                      {getAllVfx().filter(v => v.categories.includes("impact") || v.categories.includes("melee")).map(v => <option key={v.id} value={v.id}>{v.name} ({v.frames}f)</option>)}
-                    </select>
-                    <select value={charOv.actions[slot.key]?.swingVfx ?? ""} onChange={e => setSlotField(slot.key, "swingVfx", e.target.value || undefined)}
-                      className="flex-1 bg-zinc-900 border border-white/10 rounded px-1 py-0.5 text-[9px] text-white/50">
-                      <option value="">-- swing VFX --</option>
-                      {getAllVfx().filter(v => v.categories.includes("melee") || v.categories.includes("fire") || v.categories.includes("cast")).map(v => <option key={v.id} value={v.id}>{v.name} ({v.frames}f)</option>)}
-                    </select>
-                  </div>
-                )}
+          {SLOT_GROUPS.map(group => (
+            <div key={group}>
+              <div className="px-2 py-1 text-[8px] font-bold uppercase tracking-widest border-b border-white/5" style={{ color: GROUP_COLORS[group], background: GROUP_COLORS[group] + "08" }}>
+                {GROUP_LABELS[group]}
               </div>
-            );
-          })}
+              {ACTION_SLOTS.filter(s => s.group === group).map(slot => {
+                const current = getSlotAnim(slot.key);
+                const isOv = !!charOv.actions[slot.key];
+                const isAttackSlot = ["attack", "attack2", "comboQ2", "comboQ3", "dashAttack", "special", "cast", "block", "rescueRoll"].includes(slot.key);
+                const isComboSlot = ["attack", "comboQ2", "comboQ3"].includes(slot.key);
+                const isBlockSlot = slot.key === "block";
+                return (
+                  <div key={slot.key} className="border-b border-white/5 px-2 py-1.5">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className={`text-[10px] font-bold ${slot.required ? "text-white/70" : "text-white/30"}`}>{slot.label}</span>
+                      {isOv && <span className="text-[8px] text-red-400">mod</span>}
+                    </div>
+                    <select value={current?.file ?? ""} onChange={e => { const a = charAnims.find(x => x.file === e.target.value); if (a) setSlotAnim(slot.key, a.file, a.frames); }}
+                      className="w-full bg-zinc-900 border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-white/70 mb-1">
+                      <option value="">-- none --</option>
+                      {charAnims.map(a => <option key={a.file} value={a.file}>{a.key} ({a.file}, {a.frames}f)</option>)}
+                    </select>
+                    {current && (
+                      <>
+                        <div className="flex items-center gap-2 text-[9px] mb-1">
+                          <label className="flex items-center gap-0.5 text-white/30">
+                            Hold <input type="number" min={1} max={20} value={current.hold} onChange={e => setSlotField(slot.key, "hold", parseInt(e.target.value) || 5)} className="w-8 bg-zinc-800 border border-white/10 rounded px-1 py-0.5 text-white/60 text-center" />
+                          </label>
+                          <label className="flex items-center gap-0.5 text-white/30 cursor-pointer">
+                            <input type="checkbox" checked={current.loop} onChange={e => setSlotField(slot.key, "loop", e.target.checked)} className="accent-red-500" /> Loop
+                          </label>
+                          <button onClick={() => { setPreviewAnimKey(slot.key); frameRef.current = 0; }} className="ml-auto text-red-400 hover:text-red-300">Preview</button>
+                        </div>
+                        {/* Advanced maneuver fields */}
+                        {(isComboSlot || isBlockSlot || slot.key === "dashAttack" || slot.key === "rescueRoll") && (
+                          <div className="flex flex-wrap gap-1.5 text-[8px] mb-1">
+                            {isComboSlot && (
+                              <label className="flex items-center gap-0.5 text-amber-400/60">
+                                Fwd px <input type="number" min={0} max={30} value={current.forwardMotion ?? 0} onChange={e => setSlotField(slot.key, "forwardMotion", parseInt(e.target.value) || 0)} className="w-8 bg-zinc-800 border border-white/10 rounded px-1 py-0.5 text-white/60 text-center" />
+                              </label>
+                            )}
+                            {isComboSlot && (
+                              <label className="flex items-center gap-0.5 text-amber-400/60">
+                                Combo ms <input type="number" min={0} max={1000} step={50} value={current.comboWindow ?? 300} onChange={e => setSlotField(slot.key, "comboWindow", parseInt(e.target.value) || 300)} className="w-12 bg-zinc-800 border border-white/10 rounded px-1 py-0.5 text-white/60 text-center" />
+                              </label>
+                            )}
+                            {isBlockSlot && (
+                              <>
+                                <label className="flex items-center gap-0.5 text-emerald-400/60">
+                                  Freeze F# <input type="number" min={0} max={30} value={current.freezeFrame ?? Math.floor((current.frames || 1) * 0.5)} onChange={e => setSlotField(slot.key, "freezeFrame", parseInt(e.target.value) || 0)} className="w-8 bg-zinc-800 border border-white/10 rounded px-1 py-0.5 text-white/60 text-center" />
+                                </label>
+                                <label className="flex items-center gap-0.5 text-emerald-400/60 cursor-pointer">
+                                  <input type="checkbox" checked={current.reverseOnEnd ?? true} onChange={e => setSlotField(slot.key, "reverseOnEnd", e.target.checked)} className="accent-emerald-500" /> Reverse
+                                </label>
+                              </>
+                            )}
+                            {(slot.key === "dashAttack" || slot.key === "rescueRoll") && (
+                              <label className="flex items-center gap-0.5 text-sky-400/60">
+                                Fwd px <input type="number" min={0} max={50} value={current.forwardMotion ?? 0} onChange={e => setSlotField(slot.key, "forwardMotion", parseInt(e.target.value) || 0)} className="w-8 bg-zinc-800 border border-white/10 rounded px-1 py-0.5 text-white/60 text-center" />
+                              </label>
+                            )}
+                          </div>
+                        )}
+                        {/* VFX assignment for attack/special slots */}
+                        {isAttackSlot && (() => {
+                          const defaults = getDefaultVfx(selectedId, slot.key);
+                          const currentHit = charOv.actions[slot.key]?.hitVfx ?? defaults.hit ?? "";
+                          const currentSwing = charOv.actions[slot.key]?.swingVfx ?? defaults.swing ?? "";
+                          return (
+                          <div className="flex gap-1">
+                            <select value={currentHit} onChange={e => setSlotField(slot.key, "hitVfx", e.target.value || undefined)}
+                              className="flex-1 bg-zinc-900 border border-white/10 rounded px-1 py-0.5 text-[8px] text-white/40">
+                              <option value="">-- hit VFX --</option>
+                              {getAllVfx().filter(v => v.categories.includes("impact") || v.categories.includes("melee")).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                            </select>
+                            <select value={currentSwing} onChange={e => setSlotField(slot.key, "swingVfx", e.target.value || undefined)}
+                              className="flex-1 bg-zinc-900 border border-white/10 rounded px-1 py-0.5 text-[8px] text-white/40">
+                              <option value="">-- swing VFX --</option>
+                              {getAllVfx().filter(v => v.categories.includes("melee") || v.categories.includes("fire") || v.categories.includes("cast") || v.categories.includes("impact")).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                            </select>
+                          </div>
+                          );
+                        })()}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
 
           {/* Stats */}
           <div className="p-2 border-t border-white/10">

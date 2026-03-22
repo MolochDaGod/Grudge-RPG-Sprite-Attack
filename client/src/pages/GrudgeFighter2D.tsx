@@ -8,6 +8,7 @@ import { GRUDA_ROSTER, type GrudaCharDef } from "@/lib/grudaRoster";
 import { preloadVfx, getVfxById, getVfxImage, drawVfxFrame, type VfxDef } from "@/lib/vfxLibrary";
 import { getFaction, type FactionId } from "@/lib/factions";
 import { playSound, preloadSounds as preloadGameSounds } from "@/lib/gameSounds";
+import { getDefaultVfx } from "@/lib/defaultVfx";
 
 type FighterId = "p1" | "p2";
 type AnimationState = "idle" | "run" | "jump" | "fall" | "attack" | "attack2" | "special" | "takeHit" | "death" | "dodge";
@@ -2357,11 +2358,12 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     defender.x, defender.y - defender.height * 0.5, attacker.facing < 0);
             }
 
-            // Move-specific VFX
+            // Move-specific VFX — use per-character defaults from defaultVfx.ts
             const fighterKey = attacker.id === "p1" ? (p1Pick?.id ?? "p1") : (p2Pick?.id ?? "p2");
-            const move = attacker.moveVariant === "none" ? "normal" : attacker.moveVariant;
-            const smearVfx = getVfxById(pickMoveVfxId(move, fighterKey, SWING_VFX_BY_MOVE));
-            const hitVfx = getVfxById(pickMoveVfxId(move, fighterKey, HIT_VFX_BY_MOVE));
+            const moveSlot = attacker.moveVariant === "dash" ? "dashAttack" : attacker.moveVariant === "upSpecial" || attacker.moveVariant === "downSpecial" ? "special" : attacker.moveVariant === "altNormal" ? "attack2" : "attack";
+            const charDefaults = getDefaultVfx(fighterKey, moveSlot);
+            const smearVfx = getVfxById(charDefaults.swing ?? pickMoveVfxId(attacker.moveVariant, fighterKey, SWING_VFX_BY_MOVE));
+            const hitVfx = getVfxById(charDefaults.hit ?? pickMoveVfxId(attacker.moveVariant, fighterKey, HIT_VFX_BY_MOVE));
             if (smearVfx) {
                 const smearImg = getVfxImage(smearVfx.id);
                 if (smearImg) spawnEffect(smearImg, smearVfx.frames, 2, attacker.x + attacker.facing * 40, attacker.y - attacker.height * 0.5, attacker.facing < 0);

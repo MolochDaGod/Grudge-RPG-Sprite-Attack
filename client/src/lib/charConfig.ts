@@ -6,29 +6,43 @@ const API_BASE = "/api/char-config";
 
 // Game action slots that can be remapped to different animation files
 export const ACTION_SLOTS = [
-  { key: "idle", label: "Idle", required: true },
-  { key: "walk", label: "Walk / Run", required: true },
-  { key: "attack", label: "Q — Melee Attack", required: true },
-  { key: "attack2", label: "E — Melee Attack 2", required: false },
-  { key: "hurt", label: "Take Hit", required: true },
-  { key: "death", label: "Death", required: true },
-  { key: "block", label: "RMB — Block / Parry", required: false },
-  { key: "jump", label: "Jump", required: false },
-  { key: "cast", label: "Cast / Heal", required: false },
-  { key: "special", label: "Special", required: false },
-  { key: "roll", label: "Roll / Dodge", required: false },
+  // Core movement
+  { key: "idle", label: "Idle", required: true, group: "movement" },
+  { key: "walk", label: "Walk / Run", required: true, group: "movement" },
+  { key: "jump", label: "Jump", required: false, group: "movement" },
+  { key: "fall", label: "Fall", required: false, group: "movement" },
+  { key: "roll", label: "Roll / Dodge (AA/DD)", required: false, group: "movement" },
+  // Melee attacks
+  { key: "attack", label: "Q -- Melee 1", required: true, group: "melee" },
+  { key: "attack2", label: "E -- Melee 2", required: false, group: "melee" },
+  { key: "comboQ2", label: "QQ -- Combo Hit 2", required: false, group: "melee" },
+  { key: "comboQ3", label: "QQQ -- Combo Finisher", required: false, group: "melee" },
+  { key: "dashAttack", label: "LMB -- Dash Attack", required: false, group: "melee" },
+  // Specials
+  { key: "special", label: "Up/Down Special", required: false, group: "special" },
+  { key: "cast", label: "Cast / Heal", required: false, group: "special" },
+  { key: "rescueRoll", label: "Rescue Roll (Space+Space / W+LMB)", required: false, group: "special" },
+  // Defense
+  { key: "block", label: "RMB -- Block Pose", required: false, group: "defense" },
+  { key: "hurt", label: "Take Hit", required: true, group: "defense" },
+  { key: "death", label: "Death", required: true, group: "defense" },
 ] as const;
 
 export type ActionSlotKey = typeof ACTION_SLOTS[number]["key"];
 
 // Override for a single action: which animation file + frame count + hold speed
 export interface ActionOverride {
-  file: string;      // e.g. "attack2.png"
-  frames: number;    // frame count
-  hold: number;      // ticks per frame (lower = faster)
-  loop: boolean;     // loop or play once
-  hitVfx?: string;   // VFX ID to play on hit impact (e.g. "hit_effect_1")
-  swingVfx?: string; // VFX ID to play during attack swing (e.g. "smearH1")
+  file: string;        // e.g. "attack2.png"
+  frames: number;      // frame count
+  hold: number;        // ticks per frame (lower = faster)
+  loop: boolean;       // loop or play once
+  hitVfx?: string;     // VFX ID to play on hit impact
+  swingVfx?: string;   // VFX ID to play during attack swing
+  // Advanced maneuver options
+  forwardMotion?: number;   // px to push character forward per play (combo QQQ momentum)
+  freezeFrame?: number;     // frame index to freeze on (block-pose: hold mid-attack frame)
+  reverseOnEnd?: boolean;   // play animation backwards after freeze (block release)
+  comboWindow?: number;     // ms window to chain into next combo hit
 }
 
 // Full override config for a character
