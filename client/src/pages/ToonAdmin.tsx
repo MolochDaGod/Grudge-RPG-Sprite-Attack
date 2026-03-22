@@ -7,11 +7,46 @@ import { ALL_VFX, preloadVfx, type VfxDef } from "@/lib/vfxLibrary";
 function getCharAnims(char: GrudaCharDef): { key: string; file: string; frames: number }[] {
   const anims: { key: string; file: string; frames: number }[] = [];
   const add = (key: string, val?: [string, number]) => { if (val) anims.push({ key, file: val[0], frames: val[1] }); };
-  add("idle", char.idle); add("walk", char.walk); add("attack", char.attack);
+  add("idle", char.idle); add("walk", char.walk); add("attack", char.attack); add("fall", char.fall);
   add("hurt", char.hurt); add("death", char.death);
   add("attack2", char.attack2); add("block", char.block); add("jump", char.jump);
   add("cast", char.cast); add("special", char.special); add("roll", char.roll);
   return anims;
+}
+const PREVIEW_ALPHA_THRESHOLD = 8;
+const previewBottomPaddingCache = new Map<string, number>();
+
+function getPreviewBottomPadding(image: HTMLImageElement): number {
+  const cacheKey = image.currentSrc || image.src;
+  const cached = previewBottomPaddingCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth || image.width;
+  canvas.height = image.naturalHeight || image.height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return 0;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(image, 0, 0);
+  const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  let bottomPadding = 0;
+  let found = false;
+  for (let y = height - 1; y >= 0 && !found; y--) {
+    const rowStart = y * width * 4;
+    for (let x = 0; x < width; x++) {
+      const alpha = data[rowStart + x * 4 + 3];
+      if (alpha > PREVIEW_ALPHA_THRESHOLD) {
+        bottomPadding = height - 1 - y;
+        found = true;
+        break;
+      }
+    }
+  }
+
+  previewBottomPaddingCache.set(cacheKey, bottomPadding);
+  return bottomPadding;
 }
 
 // Sprite animation preview component
@@ -21,15 +56,23 @@ function SpritePreview({ src, frames, scale, playing, onFrame }: {
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const bottomPaddingRef = useRef(0);
   const frameRef = useRef(0);
   const tickRef = useRef(0);
 
   useEffect(() => {
     const img = new Image();
     img.crossOrigin = "anonymous";
-    img.onload = () => { imgRef.current = img; frameRef.current = 0; };
+    img.onload = () => {
+      imgRef.current = img;
+      bottomPaddingRef.current = getPreviewBottomPadding(img);
+      frameRef.current = 0;
+    };
     img.src = src;
-    return () => { imgRef.current = null; };
+    return () => {
+      imgRef.current = null;
+      bottomPaddingRef.current = 0;
+    };
   }, [src]);
 
   useEffect(() => {
@@ -46,14 +89,17 @@ function SpritePreview({ src, frames, scale, playing, onFrame }: {
 
       const fw = img.width / Math.max(1, frames);
       const fh = img.height;
+      const bottomPadding = bottomPaddingRef.current;
+      const visibleHeight = Math.max(1, fh - bottomPadding);
       const dw = fw * scale;
       const dh = fh * scale;
+      const visibleDh = visibleHeight * scale;
 
       canvas.width = dw;
-      canvas.height = dh;
+      canvas.height = visibleDh;
       ctx.imageSmoothingEnabled = false;
-      ctx.clearRect(0, 0, dw, dh);
-      ctx.drawImage(img, frameRef.current * fw, 0, fw, fh, 0, 0, dw, dh);
+      ctx.clearRect(0, 0, dw, visibleDh);
+      ctx.drawImage(img, frameRef.current * fw, 0, fw, fh, 0, -bottomPadding * scale, dw, dh);
 
       if (playing) {
         tickRef.current++;

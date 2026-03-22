@@ -8,8 +8,9 @@ import { GRUDA_ROSTER, type GrudaCharDef } from "@/lib/grudaRoster";
 import { preloadVfx, getVfxById, getVfxImage, drawVfxFrame, type VfxDef } from "@/lib/vfxLibrary";
 
 type FighterId = "p1" | "p2";
-type AnimationState = "idle" | "run" | "jump" | "fall" | "attack" | "takeHit" | "death" | "dodge";
-type SpecialMoveKind = "neutral" | "up" | "down";
+type AnimationState = "idle" | "run" | "jump" | "fall" | "attack" | "attack2" | "special" | "takeHit" | "death" | "dodge";
+type SpecialMoveKind = "neutral" | "up" | "down" | "airForward" | "airDown";
+type MoveVariant = "none" | "normal" | "altNormal" | "dash" | "ranged" | "upSpecial" | "downSpecial" | "rescue";
 
 interface FighterSpriteDef {
     src: string;
@@ -25,6 +26,8 @@ interface FighterSpriteSet {
     fall: FighterSpriteDef;
     dodge: FighterSpriteDef;
     attack: FighterSpriteDef;
+    attack2: FighterSpriteDef;
+    special: FighterSpriteDef;
     takeHit: FighterSpriteDef;
     death: FighterSpriteDef;
 }
@@ -49,6 +52,7 @@ interface RuntimeSprite {
     image: HTMLImageElement;
     frameWidth: number;
     frameHeight: number;
+    bottomPadding: number;
     def: FighterSpriteDef;
 }
 
@@ -78,12 +82,19 @@ interface FighterRuntime {
     superMeter: number;
     stamina: number;
     lastStaminaRegen: number;
+    dropThroughUntil: number;
+    moveVariant: MoveVariant;
     moveSet: CharacterMoveSet;
 }
 
 interface Projectile {
     id: string;
     owner: FighterId;
+    moveVariant: MoveVariant;
+    swingVfxId: string;
+    hitVfxId: string;
+    isBouncingBomb: boolean;
+    bouncesRemaining: number;
     x: number;
     y: number;
     vx: number;
@@ -113,7 +124,12 @@ const VIEWPORT_W = 1280;
 const VIEWPORT_H = 720;
 const GRAVITY = 0.75 * 0.63; // 37% slower total (30% + 10%)
 const FALL_GRAVITY_SCALE = 0.80; // characters fall 20% slower than raw gravity
-const FRICTION = 0.82;
+const GROUND_FRICTION = 0.78;
+const AIR_FRICTION = 0.94;
+const GROUND_ACCEL = 1.8;
+const AIR_ACCEL = 0.9;
+const GROUND_SPEED_MULT = 1.08;
+const AIR_SPEED_MULT = 1.0;
 const SPEED_SCALE = 0.63; // 37% slower global (30% + 10%)
 const PROJECTILE_GRAVITY = GRAVITY * 0.6; // gravity for arcing projectiles
 const MAX_AIR_JUMPS = 2;
@@ -257,10 +273,15 @@ const STAMINA_COST_SPECIAL = 2;
 const EXHAUSTION_PENALTY_MS = 300; // lockout when spamming at 0 stamina
 const DASH_VX_PER_POINT = 7;      // velocity per stamina point spent
 const DODGE_DOUBLE_TAP_MS = 220;   // AA / DD input window
-const DODGE_LOCK_MS = 300;         // total dodge action duration
-const DODGE_IFRAME_MS = 240;       // invulnerable window during dodge
+const DOWN_DROP_DOUBLE_TAP_MS = 220; // SS input window
+const DODGE_LOCK_MS = 340;         // total dodge action duration
+const DODGE_IFRAME_MS = 260;       // invulnerable window during dodge
 const DODGE_COOLDOWN_MS = 520;     // prevent dodge spam
-const DODGE_SPEED = 10 * SPEED_SCALE;
+const DODGE_SPEED = 13 * SPEED_SCALE;
+const DODGE_AIR_SPEED = 14.5 * SPEED_SCALE;
+const DROP_THROUGH_LOCK_MS = 140;
+const DROP_THROUGH_IGNORE_MS = 260;
+const DROP_THROUGH_VY = 8;
 
 // ─── Character Roster (GrudgeRPG 100x100 sprites) ───────────────────────
 
@@ -279,7 +300,8 @@ interface CharacterDef {
     attackEffect: EffectSpriteDef;
     projectileSrc?: string;
     projectileFrames?: number;
-    renderScale: number; // extra scale multiplier (Zerie 100px = 2, others = 1)
+    renderScaleX: number; // horizontal render multiplier
+    renderScaleY: number; // vertical render multiplier
     hasRollAnimation: boolean;
 }
 
@@ -303,6 +325,15 @@ function grudaToCharDef(g: GrudaCharDef): CharacterDef {
     const base = `/fighter2d/characters/${g.folder}/`;
     // hold = frames per tick; higher frame count anims need faster hold to not drag
     const autoHold = (frames: number) => frames > 20 ? 2 : frames > 10 ? 3 : frames > 6 ? 4 : 5;
+    const isSmallSprite = g.frameSize <= 100;
+    const defaultScaleY = isSmallSprite ? 2 : 1;
+    const defaultScaleX = isSmallSprite ? 1.5 : 1;
+    const scaleY = g.renderScaleY ?? g.renderScale ?? defaultScaleY;
+    const scaleX = g.renderScaleX ?? (
+        g.renderScale !== undefined && isSmallSprite
+            ? g.renderScale * 0.75
+            : (g.renderScale ?? defaultScaleX)
+    );
     const s = (file: string, frames: number, loop: boolean) => ({
         src: base + file, frames, hold: autoHold(frames), loop,
     });
@@ -314,9 +345,11 @@ function grudaToCharDef(g: GrudaCharDef): CharacterDef {
             idle:    s(g.idle[0], g.idle[1], true),
             run:     s(g.walk[0], g.walk[1], true),
             jump:    s(g.jump?.[0] ?? g.idle[0], g.jump?.[1] ?? g.idle[1], false),
-            fall:    s(g.idle[0], g.idle[1], false),
+            fall:    s(g.fall?.[0] ?? g.idle[0], g.fall?.[1] ?? g.idle[1], false),
             dodge:   s(g.roll?.[0] ?? g.walk[0], g.roll?.[1] ?? g.walk[1], g.roll ? false : true),
             attack:  s(g.attack[0], g.attack[1], false),
+            attack2: s(g.attack2?.[0] ?? g.attack[0], g.attack2?.[1] ?? g.attack[1], false),
+            special: s(g.special?.[0] ?? g.cast?.[0] ?? g.attack2?.[0] ?? g.attack[0], g.special?.[1] ?? g.cast?.[1] ?? g.attack2?.[1] ?? g.attack[1], false),
             takeHit: s(g.hurt[0], g.hurt[1], false),
             death:   s(g.death[0], g.death[1], false),
         },
@@ -340,7 +373,8 @@ function grudaToCharDef(g: GrudaCharDef): CharacterDef {
             : { src: "/fighter2d/effects/slash_arc.png", frames: 6, hold: 3 },
         projectileSrc: g.projectile ? `/fighter2d/projectiles/${g.projectile}` : undefined,
         projectileFrames: g.projectile ? 1 : undefined,
-        renderScale: g.renderScale ?? 1,
+        renderScaleX: scaleX,
+        renderScaleY: scaleY,
         hasRollAnimation: !!g.roll,
     };
 }
@@ -349,6 +383,47 @@ const CHARACTER_ROSTER: CharacterDef[] = GRUDA_ROSTER.map(grudaToCharDef);
 
 function clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
+}
+
+function approach(value: number, target: number, delta: number): number {
+    if (value < target) return Math.min(value + delta, target);
+    if (value > target) return Math.max(value - delta, target);
+    return target;
+}
+
+const SWING_VFX_BY_MOVE: Record<MoveVariant, string[]> = {
+    none: ["smearH1"],
+    normal: ["smearH1", "smearH2", "vineWhip"],
+    altNormal: ["smearH3", "shadowSlash", "smearV1"],
+    dash: ["smearV2", "smearV3", "dustCloud"],
+    ranged: ["fireBreath", "electricChain", "darkMist", "leafStorm"],
+    upSpecial: ["lightningStrike", "holySmite", "smearV2"],
+    downSpecial: ["voidPulse", "rockSmash", "bloodSplat"],
+    rescue: ["energyBurst", "dustCloud", "smearV3"],
+};
+
+const HIT_VFX_BY_MOVE: Record<MoveVariant, string[]> = {
+    none: ["hit_effect_1"],
+    normal: ["hit_effect_1", "explosionSmall"],
+    altNormal: ["sparkBurst", "hit_effect_1"],
+    dash: ["explosionSmall", "bloodSplat", "hit_effect_1"],
+    ranged: ["fireBreathHit", "iceShatter", "sparkBurst", "waterSplash"],
+    upSpecial: ["lightningStrike", "energyBurst", "holySmite"],
+    downSpecial: ["voidPulse", "rockSmash", "bloodSplat"],
+    rescue: ["energyBurst", "explosionSmall", "hit_effect_1"],
+};
+
+function hashString(str: string): number {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) {
+        h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+    }
+    return Math.abs(h);
+}
+
+function pickMoveVfxId(move: MoveVariant, fighterKey: string, pool: Record<MoveVariant, string[]>): string {
+    const ids = pool[move] ?? pool.none;
+    return ids[hashString(`${fighterKey}:${move}`) % ids.length];
 }
 
 function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet, stage: StageDefinition): FighterRuntime {
@@ -379,6 +454,8 @@ function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet, stage: S
         superMeter: 0,
         stamina: STAMINA_MAX,
         lastStaminaRegen: performance.now(),
+        dropThroughUntil: 0,
+        moveVariant: "none",
         moveSet,
     };
 }
@@ -404,10 +481,12 @@ function respawnFighter(fighter: FighterRuntime, stage: StageDefinition): Fighte
         superMeter: fighter.superMeter,
         stamina: STAMINA_MAX,
         lastStaminaRegen: now,
+        dropThroughUntil: 0,
+        moveVariant: "none",
     };
 }
 
-function isOnPlatform(fighter: FighterRuntime, stage: StageDefinition): number | null {
+function isOnPlatform(fighter: FighterRuntime, stage: StageDefinition, ignoreOneWayPlatforms = false): number | null {
     // Wider tolerance prevents fast-falling characters from clipping through
     const tolerance = Math.max(16, Math.abs(fighter.vy) * 1.5);
     // Check main floor
@@ -415,10 +494,33 @@ function isOnPlatform(fighter: FighterRuntime, stage: StageDefinition): number |
         && fighter.x >= stage.mainFloorX - 20 && fighter.x <= stage.mainFloorX + stage.mainFloorW + 20) {
         return stage.mainFloorY;
     }
+    if (ignoreOneWayPlatforms) return null;
     // Check platforms (one-way: only land from above)
     for (const p of stage.platforms) {
         if (fighter.vy >= 0 && fighter.y >= p.y - 4 && fighter.y <= p.y + tolerance
             && fighter.x >= p.x - 10 && fighter.x <= p.x + p.w + 10) {
+            return p.y;
+        }
+    }
+    return null;
+}
+
+function getProjectileFloorY(projectile: { x: number; y: number }, stage: StageDefinition): number | null {
+    if (
+        projectile.x >= stage.mainFloorX - 10 &&
+        projectile.x <= stage.mainFloorX + stage.mainFloorW + 10 &&
+        projectile.y >= stage.mainFloorY - 2 &&
+        projectile.y <= stage.mainFloorY + 18
+    ) {
+        return stage.mainFloorY;
+    }
+    for (const p of stage.platforms) {
+        if (
+            projectile.x >= p.x - 8 &&
+            projectile.x <= p.x + p.w + 8 &&
+            projectile.y >= p.y - 2 &&
+            projectile.y <= p.y + 16
+        ) {
             return p.y;
         }
     }
@@ -535,6 +637,41 @@ function applyDamage(
         wasCounter: false,
     };
 }
+const IMAGE_ALPHA_THRESHOLD = 8;
+const spriteBottomPaddingCache = new Map<string, number>();
+
+function getImageBottomPadding(image: HTMLImageElement): number {
+    const cacheKey = image.currentSrc || image.src;
+    const cached = spriteBottomPaddingCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth || image.width;
+    canvas.height = image.naturalHeight || image.height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return 0;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, 0, 0);
+    const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    let bottomPadding = 0;
+    let found = false;
+    for (let y = height - 1; y >= 0 && !found; y--) {
+        const rowStart = y * width * 4;
+        for (let x = 0; x < width; x++) {
+            const alpha = data[rowStart + x * 4 + 3];
+            if (alpha > IMAGE_ALPHA_THRESHOLD) {
+                bottomPadding = height - 1 - y;
+                found = true;
+                break;
+            }
+        }
+    }
+
+    spriteBottomPaddingCache.set(cacheKey, bottomPadding);
+    return bottomPadding;
+}
 
 function loadSpriteSet(set: FighterSpriteSet): Promise<Record<AnimationState, RuntimeSprite>> {
     const entries = Object.entries(set) as [AnimationState, FighterSpriteDef][];
@@ -550,6 +687,7 @@ function loadSpriteSet(set: FighterSpriteSet): Promise<Record<AnimationState, Ru
                                 image,
                                 frameWidth: image.width / def.frames,
                                 frameHeight: image.height,
+                                bottomPadding: getImageBottomPadding(image),
                                 def,
                             },
                         ]);
@@ -617,11 +755,15 @@ function AttackFrameCanvas({ src, frames, frameSize, size }: { src: string; fram
             const pickFrame = Math.min(Math.floor(frames * 0.6), frames - 1);
             ctx.clearRect(0, 0, size, size);
             ctx.imageSmoothingEnabled = false;
-            // Draw the single frame scaled to fill the canvas
-            const scale = Math.min(size / fw, size / fh);
+            const bottomPadding = getImageBottomPadding(img);
+            const visibleHeight = Math.max(1, fh - bottomPadding);
+            // Draw the single frame scaled to fill the canvas with feet on the visible bottom edge
+            const scale = Math.min(size / fw, size / visibleHeight);
             const dw = fw * scale;
             const dh = fh * scale;
-            ctx.drawImage(img, pickFrame * fw, 0, fw, fh, (size - dw) / 2, (size - dh) / 2, dw, dh);
+            const drawX = (size - dw) / 2;
+            const drawY = size - visibleHeight * scale - bottomPadding * scale;
+            ctx.drawImage(img, pickFrame * fw, 0, fw, fh, drawX, drawY, dw, dh);
         };
         img.src = src;
     }, [src, frames, frameSize, size]);
@@ -641,9 +783,9 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const worldRef = useRef<WorldState | null>(null);
     const pressedKeysRef = useRef<Set<string>>(new Set());
-    const movementTapRef = useRef<Record<FighterId, { left: number; right: number }>>({
-        p1: { left: 0, right: 0 },
-        p2: { left: 0, right: 0 },
+    const movementTapRef = useRef<Record<FighterId, { left: number; right: number; down: number }>>({
+        p1: { left: 0, right: 0, down: 0 },
+        p2: { left: 0, right: 0, down: 0 },
     });
     const animationFrameRef = useRef<number | null>(null);
     const [isReady, setIsReady] = useState(false);
@@ -651,6 +793,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const [hud, setHud] = useState({ p1Hp: 200, p2Hp: 200, p1Super: 0, p2Super: 0, p1Stocks: STARTING_STOCKS, p2Stocks: STARTING_STOCKS, p1AirJumps: MAX_AIR_JUMPS, p2AirJumps: MAX_AIR_JUMPS, winner: null as FighterId | null, elapsed: 0 });
     const [vsAI, setVsAI] = useState(true);
     const aiTimerRef = useRef(0);
+    const mouseScreenRef = useRef({ x: VIEWPORT_W / 2, y: VIEWPORT_H / 2 });
+    const mouseWorldRef = useRef({ x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2 });
 
     const assetsRef = useRef<{
         p1: Record<AnimationState, RuntimeSprite>;
@@ -711,6 +855,41 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         }
     }, []);
 
+    const queueRescueRoll = useCallback((fighterId: FighterId, targetX: number, targetY: number) => {
+        const world = worldRef.current;
+        if (!world || world.superFreeze) return;
+        const now = performance.now();
+        const actor = fighterId === "p1" ? world.p1 : world.p2;
+        if (world.winner || actor.hp <= 0) return;
+        if (now < actor.stateLockUntil || now < actor.specialCooldownUntil) return;
+
+        const dx = targetX - actor.x;
+        const dy = targetY - (actor.y - actor.height * 0.5);
+        const len = Math.hypot(dx, dy) || 1;
+        const nx = dx / len;
+        const ny = dy / len;
+        const rescueSpeed = DODGE_AIR_SPEED * 1.2;
+
+        const next = setState(
+            {
+                ...actor,
+                vx: nx * rescueSpeed,
+                vy: ny * rescueSpeed,
+                facing: nx >= 0 ? 1 : -1,
+                attackHasConnected: false,
+                moveVariant: "rescue",
+                counterUntil: 0,
+                stateLockUntil: now + DODGE_LOCK_MS + 70,
+                specialCooldownUntil: now + DODGE_COOLDOWN_MS + 220,
+                invulnUntil: Math.max(actor.invulnUntil, now + DODGE_IFRAME_MS),
+            },
+            "dodge",
+            now
+        );
+        if (fighterId === "p1") world.p1 = next;
+        else world.p2 = next;
+    }, []);
+
     const resetMatch = useCallback(() => {
         if (!p1Pick || !p2Pick) return;
         const stage = stageRef.current;
@@ -726,7 +905,21 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         setHud({ p1Hp: 200, p2Hp: 200, p1Super: 0, p2Super: 0, p1Stocks: STARTING_STOCKS, p2Stocks: STARTING_STOCKS, p1AirJumps: MAX_AIR_JUMPS, p2AirJumps: MAX_AIR_JUMPS, winner: null, elapsed: 0 });
     }, [p1Pick, p2Pick]);
 
-    const queueNormalAttack = useCallback((fighterId: FighterId) => {
+    const updateMouseRefsFromClient = useCallback((clientX: number, clientY: number) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        const screenX = ((clientX - rect.left) / rect.width) * VIEWPORT_W;
+        const screenY = ((clientY - rect.top) / rect.height) * VIEWPORT_H;
+        mouseScreenRef.current = { x: screenX, y: screenY };
+        const cam = cameraRef.current;
+        mouseWorldRef.current = {
+            x: cam.x + screenX / cam.zoom,
+            y: cam.y + screenY / cam.zoom,
+        };
+    }, []);
+
+    const queueNormalAttack = useCallback((fighterId: FighterId, useAltAnimation = false) => {
         const world = worldRef.current;
         if (!world) return;
         const now = performance.now();
@@ -739,8 +932,9 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 ...actor,
                 stateLockUntil: now + 330,
                 attackHasConnected: false,
+                moveVariant: useAltAnimation ? "altNormal" : "normal",
             },
-            "attack",
+            useAltAnimation ? "attack2" : "attack",
             now
         );
 
@@ -758,27 +952,44 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         const actor = fighterId === "p1" ? world.p1 : world.p2;
         if (world.winner || actor.hp <= 0) return;
         if (now < actor.stateLockUntil || now < actor.specialCooldownUntil) return;
+        const isProjectileSpecial = kind === "neutral" || kind === "airForward" || kind === "airDown";
 
-        // Ranged costs 1 stamina
-        if (kind === "neutral") {
+        // Projectile specials cost 1 stamina
+        if (isProjectileSpecial) {
             if (actor.stamina < STAMINA_COST_RANGED) {
                 const exhausted = { ...actor, stateLockUntil: now + EXHAUSTION_PENALTY_MS };
                 if (fighterId === "p1") world.p1 = exhausted; else world.p2 = exhausted;
                 return;
             }
-            // Determine if projectile has gravity based on character type
-            // Physical projectiles (arrows, axes, bolts) arc; magic (fireballs, spells) fly straight
             const charDef = CHARACTER_ROSTER.find(c => c.moveSet.name === actor.moveSet.name);
             const projSrc = charDef?.projectileSrc ?? '';
             const isPhysical = /arrow|axe|bolt|bullet/i.test(projSrc);
+            const fighterKey = fighterId === "p1" ? (p1Pick?.id ?? actor.moveSet.name) : (p2Pick?.id ?? actor.moveSet.name);
+            let vx = actor.facing * 10 * SPEED_SCALE;
+            let vy = isPhysical ? -1.5 : 0;
+            let hasGravity = isPhysical;
+            if (kind === "airForward") {
+                vx = actor.facing * 12 * SPEED_SCALE;
+                vy = 0;
+                hasGravity = false;
+            } else if (kind === "airDown") {
+                vx = actor.facing * 9.5 * SPEED_SCALE;
+                vy = 4.5;
+                hasGravity = true;
+            }
             const projectile: Projectile = {
                 id: `${fighterId}-${now}`,
                 owner: fighterId,
+                moveVariant: "ranged",
+                swingVfxId: pickMoveVfxId("ranged", fighterKey, SWING_VFX_BY_MOVE),
+                hitVfxId: pickMoveVfxId("ranged", fighterKey, HIT_VFX_BY_MOVE),
+                isBouncingBomb: kind === "airDown",
+                bouncesRemaining: kind === "airDown" ? 2 : 0,
                 x: actor.x + actor.facing * 40,
-                y: actor.y - actor.height * 0.45, // spawn low enough to jump over
-                vx: actor.facing * 10 * SPEED_SCALE,
-                vy: isPhysical ? -1.5 : 0, // physical projectiles arc upward slightly then fall
-                hasGravity: isPhysical,
+                y: actor.y - actor.height * 0.45,
+                vx,
+                vy,
+                hasGravity,
                 radius: 14,
                 damage: actor.moveSet.projectileDamage,
                 expiresAt: now + 2200,
@@ -791,8 +1002,9 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     stateLockUntil: now + 300,
                     specialCooldownUntil: now + 800,
                     attackHasConnected: false,
+                    moveVariant: "ranged",
                 },
-                "attack",
+                "special",
                 now
             );
 
@@ -819,8 +1031,10 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     vx: actor.facing * 8,
                     stateLockUntil: now + 340,
                     specialCooldownUntil: now + 1050,
+                    attackHasConnected: false,
+                    moveVariant: "upSpecial",
                 },
-                "jump",
+                "special",
                 now
             );
             if (fighterId === "p1") world.p1 = next;
@@ -835,13 +1049,15 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 stateLockUntil: now + 360,
                 specialCooldownUntil: now + 1200,
                 counterUntil: now + 420,
+                attackHasConnected: false,
+                moveVariant: "downSpecial",
             },
-            "attack",
+            "special",
             now
         );
         if (fighterId === "p1") world.p1 = next;
         else world.p2 = next;
-    }, []);
+    }, [p1Pick?.id, p2Pick?.id]);
 
     const tryJump = useCallback((fighterId: FighterId) => {
         const world = worldRef.current;
@@ -854,11 +1070,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         const grounded = stage ? isOnPlatform(actor, stage) !== null : actor.y >= 600;
         if (grounded) {
             // Ground jump
-            const next = setState({ ...actor, vy: -actor.moveSet.jumpForce * SPEED_SCALE, airJumpsLeft: MAX_AIR_JUMPS }, "jump", now);
+            const next = setState({ ...actor, vy: -actor.moveSet.jumpForce * SPEED_SCALE, airJumpsLeft: MAX_AIR_JUMPS, moveVariant: "none", attackHasConnected: false }, "jump", now);
             if (fighterId === "p1") world.p1 = next; else world.p2 = next;
         } else if (actor.airJumpsLeft > 0) {
             // Air jump (double jump)
-            const next = setState({ ...actor, vy: -actor.moveSet.jumpForce * SPEED_SCALE * 0.85, airJumpsLeft: actor.airJumpsLeft - 1 }, "jump", now);
+            const next = setState({ ...actor, vy: -actor.moveSet.jumpForce * SPEED_SCALE * 0.85, airJumpsLeft: actor.airJumpsLeft - 1, moveVariant: "none", attackHasConnected: false }, "jump", now);
             if (fighterId === "p1") world.p1 = next; else world.p2 = next;
         }
     }, []);
@@ -871,7 +1087,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         if (actor.hp <= 0 || actor.superMeter < SUPER_METER_MAX) return;
         if (now < actor.stateLockUntil) return;
         world.superFreeze = { attacker: fighterId, until: now + SUPER_FREEZE_DURATION, damageAt: now + SUPER_FREEZE_DURATION * 0.7, dealt: false };
-        const next = setState({ ...actor, superMeter: 0, stateLockUntil: now + SUPER_FREEZE_DURATION + 200 }, "attack", now);
+        const next = setState({ ...actor, superMeter: 0, stateLockUntil: now + SUPER_FREEZE_DURATION + 200, attackHasConnected: false, moveVariant: "none" }, "special", now);
         if (fighterId === "p1") world.p1 = next; else world.p2 = next;
     }, []);
 
@@ -885,12 +1101,16 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
         const stage = stageRef.current;
         const grounded = isOnPlatform(actor, stage) !== null;
-        if (!grounded) return;
+        const dodgeSpeed = grounded ? DODGE_SPEED : DODGE_AIR_SPEED;
+        const dodgeVy = grounded ? actor.vy : Math.min(actor.vy * 0.55, 2);
 
         const next = setState(
             {
                 ...actor,
-                vx: direction * DODGE_SPEED,
+                vx: direction * dodgeSpeed,
+                vy: dodgeVy,
+                attackHasConnected: false,
+                moveVariant: "none",
                 counterUntil: 0,
                 stateLockUntil: now + DODGE_LOCK_MS,
                 specialCooldownUntil: now + DODGE_COOLDOWN_MS,
@@ -900,6 +1120,38 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             now
         );
 
+        if (fighterId === "p1") world.p1 = next;
+        else world.p2 = next;
+    }, []);
+
+    const queueDropThrough = useCallback((fighterId: FighterId) => {
+        const world = worldRef.current;
+        if (!world || world.superFreeze) return;
+        const now = performance.now();
+        const actor = fighterId === "p1" ? world.p1 : world.p2;
+        if (world.winner || actor.hp <= 0) return;
+        if (now < actor.stateLockUntil) return;
+
+        const stage = stageRef.current;
+        const floorY = isOnPlatform(actor, stage);
+        if (floorY === null) return;
+        const onMainFloor = Math.abs(floorY - stage.mainFloorY) < 0.5;
+        if (onMainFloor) return;
+
+        const next = setState(
+            {
+                ...actor,
+                y: actor.y + 2,
+                vy: Math.max(actor.vy, DROP_THROUGH_VY),
+                dropThroughUntil: now + DROP_THROUGH_IGNORE_MS,
+                stateLockUntil: now + DROP_THROUGH_LOCK_MS,
+                counterUntil: 0,
+                attackHasConnected: false,
+                moveVariant: "none",
+            },
+            "fall",
+            now
+        );
         if (fighterId === "p1") world.p1 = next;
         else world.p2 = next;
     }, []);
@@ -931,8 +1183,9 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 stamina: actor.stamina - spend,
                 stateLockUntil: now + 350,
                 attackHasConnected: false,
+                moveVariant: "dash",
             },
-            "attack",
+            "attack2",
             now
         );
         if (fighterId === "p1") world.p1 = next; else world.p2 = next;
@@ -954,6 +1207,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 stateLockUntil: now + 400,
                 specialCooldownUntil: now + 900,
                 counterUntil: now + 500,
+                moveVariant: "none",
             },
             "idle",
             now
@@ -964,12 +1218,28 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const processInput = useCallback((fighterId: FighterId, controls: typeof P1_CONTROLS, key: string) => {
         const keys = pressedKeysRef.current;
         if (key === controls.jump) tryJump(fighterId);
-        if (key === controls.attack1 || key === controls.attack2) {
+        if (key === controls.attack1) {
             const up = keys.has(controls.jump);
             const down = keys.has(controls.down);
             if (up) queueSpecial(fighterId, "up");
             else if (down) queueSpecial(fighterId, "down");
             else queueNormalAttack(fighterId);
+        }
+        if (key === controls.attack2) {
+            const world = worldRef.current;
+            const actor = world ? (fighterId === "p1" ? world.p1 : world.p2) : null;
+            const stage = stageRef.current;
+            const airborne = actor ? isOnPlatform(actor, stage, performance.now() < actor.dropThroughUntil) === null : false;
+            if (airborne) {
+                const down = keys.has(controls.down);
+                queueSpecial(fighterId, down ? "airDown" : "airForward");
+            } else {
+                const up = keys.has(controls.jump);
+                const down = keys.has(controls.down);
+                if (up) queueSpecial(fighterId, "up");
+                else if (down) queueSpecial(fighterId, "down");
+                else queueNormalAttack(fighterId, true);
+            }
         }
         if (key === controls.ranged) queueSpecial(fighterId, "neutral");
         if (key === controls.super) queueSuper(fighterId);
@@ -1006,6 +1276,22 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         return null;
     }, [queueDodge]);
 
+    const tryDoubleTapDrop = useCallback((
+        fighterId: FighterId,
+        controls: typeof P1_CONTROLS,
+        key: string
+    ): boolean => {
+        if (key !== controls.down) return false;
+        const now = performance.now();
+        const taps = movementTapRef.current[fighterId];
+        const isDoubleTap = now - taps.down <= DOWN_DROP_DOUBLE_TAP_MS;
+        taps.down = now;
+        if (!isDoubleTap) return false;
+        taps.down = 0;
+        queueDropThrough(fighterId);
+        return true;
+    }, [queueDropThrough]);
+
     // AI opponent logic
     const runAI = useCallback((now: number) => {
         const world = worldRef.current;
@@ -1015,9 +1301,10 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         if (now - aiTimerRef.current < 200 + Math.random() * 200) return;
         aiTimerRef.current = now;
         const dist = Math.abs(ai.x - player.x);
+        const stage = stageRef.current;
         if (now < ai.stateLockUntil) return;
         const incoming = world.projectiles.find(p => p.owner === "p1" && Math.abs(p.x - ai.x) < 200);
-        if (incoming && ai.y >= FLOOR_Y - 1) { tryJump("p2"); return; }
+        if (incoming && ai.y >= stage.mainFloorY - 1) { tryJump("p2"); return; }
         if (ai.superMeter >= SUPER_METER_MAX && dist < 200) { queueSuper("p2"); return; }
         if (dist < 150) {
             const r = Math.random();
@@ -1068,7 +1355,6 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     useEffect(() => {
         if (!isOnline) return;
         const opponentSlot: FighterId = myFighter === "p1" ? "p2" : "p1";
-        const opponentControls = opponentSlot === "p1" ? P1_CONTROLS : P2_CONTROLS;
 
         pvp.onRemoteInput((data) => {
             // Store remote keys separately — do NOT mix with local pressedKeys
@@ -1078,6 +1364,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         pvp.onRemoteAction((data) => {
             const a = data.action;
             if (a === "attack") queueNormalAttack(opponentSlot);
+            else if (a === "attack2") queueNormalAttack(opponentSlot, true);
             else if (a === "dash") queueDashAttack(opponentSlot);
             else if (a === "dodge") {
                 const rawDirection = Number(data.params?.direction);
@@ -1090,8 +1377,16 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             else if (a === "ranged") queueSpecial(opponentSlot, "neutral");
             else if (a === "up-special") queueSpecial(opponentSlot, "up");
             else if (a === "down-special") queueSpecial(opponentSlot, "down");
+            else if (a === "air-forward") queueSpecial(opponentSlot, "airForward");
+            else if (a === "air-down") queueSpecial(opponentSlot, "airDown");
+            else if (a === "drop") queueDropThrough(opponentSlot);
+            else if (a === "rescue") {
+                const tx = Number(data.params?.tx);
+                const ty = Number(data.params?.ty);
+                if (Number.isFinite(tx) && Number.isFinite(ty)) queueRescueRoll(opponentSlot, tx, ty);
+            }
         });
-    }, [isOnline, myFighter, pvp, queueNormalAttack, queueDashAttack, queueDodge, queueBlock, tryJump, queueSuper, queueSpecial]);
+    }, [isOnline, myFighter, pvp, queueNormalAttack, queueDashAttack, queueDodge, queueBlock, tryJump, queueSuper, queueSpecial, queueDropThrough, queueRescueRoll]);
 
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
@@ -1101,28 +1396,48 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             if (isOnline) {
                 // In PvP: always use P1 controls, mapped to our assigned slot
                 const dodgeDirection = tryDoubleTapDodge(myFighter, P1_CONTROLS, key);
+                const didDrop = tryDoubleTapDrop(myFighter, P1_CONTROLS, key);
                 processInput(myFighter, P1_CONTROLS, key);
                 // Send action to opponent
-                if (key === P1_CONTROLS.attack1 || key === P1_CONTROLS.attack2) {
+                if (key === P1_CONTROLS.attack1) {
                     const up = pressedKeysRef.current.has(P1_CONTROLS.jump);
                     const down = pressedKeysRef.current.has(P1_CONTROLS.down);
                     if (up) pvp.sendAction("up-special");
                     else if (down) pvp.sendAction("down-special");
                     else pvp.sendAction("attack");
                 }
+                if (key === P1_CONTROLS.attack2) {
+                    const world = worldRef.current;
+                    const actor = world ? (myFighter === "p1" ? world.p1 : world.p2) : null;
+                    const stage = stageRef.current;
+                    const airborne = actor ? isOnPlatform(actor, stage, performance.now() < actor.dropThroughUntil) === null : false;
+                    if (airborne) {
+                        const down = pressedKeysRef.current.has(P1_CONTROLS.down);
+                        pvp.sendAction(down ? "air-down" : "air-forward");
+                    } else {
+                        const up = pressedKeysRef.current.has(P1_CONTROLS.jump);
+                        const down = pressedKeysRef.current.has(P1_CONTROLS.down);
+                        if (up) pvp.sendAction("up-special");
+                        else if (down) pvp.sendAction("down-special");
+                        else pvp.sendAction("attack2");
+                    }
+                }
                 if (key === P1_CONTROLS.ranged) pvp.sendAction("ranged");
                 if (key === P1_CONTROLS.super) pvp.sendAction("super");
                 if (key === P1_CONTROLS.jump) pvp.sendAction("jump");
                 if (dodgeDirection !== null) pvp.sendAction("dodge", { direction: dodgeDirection });
+                if (didDrop) pvp.sendAction("drop");
                 // Send movement keys
                 pvp.sendInput([...pressedKeysRef.current].filter(k =>
                     k === P1_CONTROLS.left || k === P1_CONTROLS.right || k === P1_CONTROLS.jump || k === P1_CONTROLS.down
                 ));
             } else {
                 tryDoubleTapDodge("p1", P1_CONTROLS, key);
+                tryDoubleTapDrop("p1", P1_CONTROLS, key);
                 processInput("p1", P1_CONTROLS, key);
                 if (!vsAI) {
                     tryDoubleTapDodge("p2", P2_CONTROLS, key);
+                    tryDoubleTapDrop("p2", P2_CONTROLS, key);
                     processInput("p2", P2_CONTROLS, key);
                 }
             }
@@ -1137,24 +1452,42 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         };
 
         // Mouse: LMB = dash attack, RMB = block/parry
+        const onMouseMove = (e: MouseEvent) => {
+            updateMouseRefsFromClient(e.clientX, e.clientY);
+        };
         const onMouseDown = (e: MouseEvent) => {
-            if (e.button === 0) { queueDashAttack(isOnline ? myFighter : "p1"); if (isOnline) pvp.sendAction("dash"); }
+            if (e.button === 0) {
+                updateMouseRefsFromClient(e.clientX, e.clientY);
+                const controlledFighter = isOnline ? myFighter : "p1";
+                const jumpKey = isOnline ? P1_CONTROLS.jump : (controlledFighter === "p1" ? P1_CONTROLS.jump : P2_CONTROLS.jump);
+                const isJumpHeld = pressedKeysRef.current.has(jumpKey);
+                if (isJumpHeld) {
+                    const target = mouseWorldRef.current;
+                    queueRescueRoll(controlledFighter, target.x, target.y);
+                    if (isOnline) pvp.sendAction("rescue", { tx: target.x, ty: target.y });
+                } else {
+                    queueDashAttack(controlledFighter);
+                    if (isOnline) pvp.sendAction("dash");
+                }
+            }
             if (e.button === 2) { queueBlock(isOnline ? myFighter : "p1"); if (isOnline) pvp.sendAction("block"); }
         };
         const onContextMenu = (e: MouseEvent) => e.preventDefault();
 
         window.addEventListener("keydown", onKeyDown);
         window.addEventListener("keyup", onKeyUp);
+        window.addEventListener("mousemove", onMouseMove);
         window.addEventListener("mousedown", onMouseDown);
         window.addEventListener("contextmenu", onContextMenu);
         return () => {
             window.removeEventListener("keydown", onKeyDown);
             window.removeEventListener("keyup", onKeyUp);
+            window.removeEventListener("mousemove", onMouseMove);
             window.removeEventListener("mousedown", onMouseDown);
             window.removeEventListener("contextmenu", onContextMenu);
             pressedKeysRef.current.clear();
         };
-    }, [processInput, tryDoubleTapDodge, vsAI, queueDashAttack, queueDodge, queueBlock, isOnline, myFighter, pvp]);
+    }, [processInput, tryDoubleTapDodge, tryDoubleTapDrop, vsAI, queueDashAttack, queueDodge, queueBlock, queueRescueRoll, updateMouseRefsFromClient, isOnline, myFighter, pvp]);
 
     useEffect(() => {
         if (selectPhase !== "fight" || !p1Pick || !p2Pick) return;
@@ -1209,44 +1542,6 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         };
     }, [selectPhase, p1Pick, p2Pick]);
 
-    useEffect(() => {
-        const onKeyDown = (event: KeyboardEvent) => {
-            const key = event.key.toLowerCase();
-            pressedKeysRef.current.add(key);
-
-            if (event.repeat) return;
-
-            if (key === P1_CONTROLS.jump) tryJump("p1");
-            if (key === P2_CONTROLS.jump) tryJump("p2");
-            if (key === P1_CONTROLS.normal) queueNormalAttack("p1");
-            if (key === P2_CONTROLS.normal) queueNormalAttack("p2");
-
-            if (key === P1_CONTROLS.special) {
-                const up = pressedKeysRef.current.has(P1_CONTROLS.jump);
-                const down = pressedKeysRef.current.has(P1_CONTROLS.down);
-                queueSpecial("p1", up ? "up" : down ? "down" : "neutral");
-            }
-
-            if (key === P2_CONTROLS.special) {
-                const up = pressedKeysRef.current.has(P2_CONTROLS.jump);
-                const down = pressedKeysRef.current.has(P2_CONTROLS.down);
-                queueSpecial("p2", up ? "up" : down ? "down" : "neutral");
-            }
-        };
-
-        const onKeyUp = (event: KeyboardEvent) => {
-            pressedKeysRef.current.delete(event.key.toLowerCase());
-        };
-
-        window.addEventListener("keydown", onKeyDown);
-        window.addEventListener("keyup", onKeyUp);
-
-        return () => {
-            window.removeEventListener("keydown", onKeyDown);
-            window.removeEventListener("keyup", onKeyUp);
-            pressedKeysRef.current.clear();
-        };
-    }, [queueNormalAttack, queueSpecial, tryJump]);
 
     useEffect(() => {
         if (!isReady || !assetsRef.current) return;
@@ -1283,13 +1578,14 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         ) => {
             const currentSprite = sprites[fighter.state];
             const sourceX = fighter.frameIndex * currentSprite.frameWidth;
-            // Scale to ~300px base, then apply per-character renderScale (Zerie = 2x)
+            // Scale to ~300px base, then apply per-character non-uniform multipliers
             const charDef = fighter.id === "p1" ? p1Pick : p2Pick;
-            const renderMul = charDef?.renderScale ?? 1;
-            const targetHeight = 300 * renderMul;
-            const scale = targetHeight / currentSprite.frameHeight;
-            const drawWidth = currentSprite.frameWidth * scale;
-            const drawHeight = currentSprite.frameHeight * scale;
+            const renderMulX = charDef?.renderScaleX ?? 1;
+            const renderMulY = charDef?.renderScaleY ?? 1;
+            const baseScale = 300 / currentSprite.frameHeight;
+            const scaleY = baseScale * renderMulY;
+            const drawWidth = currentSprite.frameWidth * baseScale * renderMulX;
+            const drawHeight = currentSprite.frameHeight * scaleY;
 
             // Hit flash — tint the fighter white briefly
             const now = performance.now();
@@ -1301,9 +1597,9 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             const dodgeSpin = isFallbackDodgeSpin ? dodgeSpinDirection * dodgeProgress * Math.PI * 2 : 0;
 
             // fighter.y = foot position (on platform)
-            // Draw sprite so bottom edge aligns with fighter.y
+            // Draw sprite so bottom visible pixel aligns with fighter.y (ignores transparent strip padding)
             const drawX = fighter.x - drawWidth / 2;
-            const drawY = fighter.y - drawHeight;
+            const drawY = fighter.y - drawHeight + currentSprite.bottomPadding * scaleY;
 
             ctx.save();
             if (fighter.facing < 0) {
@@ -1313,9 +1609,10 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             }
 
             if (isFallbackDodgeSpin) {
-                ctx.translate(fighter.x, fighter.y - drawHeight / 2);
+                const spinCenterY = drawY + drawHeight / 2;
+                ctx.translate(fighter.x, spinCenterY);
                 ctx.rotate(dodgeSpin);
-                ctx.translate(-fighter.x, -(fighter.y - drawHeight / 2));
+                ctx.translate(-fighter.x, -spinCenterY);
             }
 
             // Invulnerability flicker (respawn protection)
@@ -1687,30 +1984,37 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             keySource?: Set<string>
         ): FighterRuntime => {
             const isLocked = now < fighter.stateLockUntil;
+            const stage = stageRef.current;
+            const ignoreOneWayPlatforms = now < fighter.dropThroughUntil;
             const keys = keySource ?? pressedKeysRef.current;
             const leftPressed = keys.has(controls.left);
             const rightPressed = keys.has(controls.right);
+            const currentlyGrounded = isOnPlatform(fighter, stage, ignoreOneWayPlatforms) !== null;
 
             let vx = fighter.vx;
             if (!isLocked && fighter.hp > 0) {
-                if (leftPressed && !rightPressed) vx = -fighter.moveSet.runSpeed * SPEED_SCALE;
-                else if (!leftPressed && rightPressed) vx = fighter.moveSet.runSpeed * SPEED_SCALE;
-                else vx *= FRICTION;
+                const direction = leftPressed === rightPressed ? 0 : (leftPressed ? -1 : 1);
+                if (direction !== 0) {
+                    const targetSpeed = fighter.moveSet.runSpeed * SPEED_SCALE * (currentlyGrounded ? GROUND_SPEED_MULT : AIR_SPEED_MULT);
+                    const accel = currentlyGrounded ? GROUND_ACCEL : AIR_ACCEL;
+                    vx = approach(vx, direction * targetSpeed, accel);
+                } else {
+                    vx *= currentlyGrounded ? GROUND_FRICTION : AIR_FRICTION;
+                }
             } else {
-                vx *= 0.92;
+                vx *= currentlyGrounded ? 0.9 : AIR_FRICTION;
             }
 
             let x = fighter.x + vx;
             let y = fighter.y + fighter.vy;
             // Characters fall 20% slower than raw gravity
             // AIR SLAM: attacking while falling accelerates downward
-            const isAirAttacking = fighter.state === "attack" && fighter.vy > 0;
+            const isAirAttacking = (fighter.state === "attack" || fighter.state === "attack2" || fighter.state === "special") && fighter.vy > 0;
             const gravScale = isAirAttacking ? 2.5 : FALL_GRAVITY_SCALE;
             let vy = fighter.vy + GRAVITY * gravScale;
 
             // Platform collision
-            const stage = stageRef.current;
-            const floorY = isOnPlatform({ ...fighter, x, y, vy }, stage);
+            const floorY = isOnPlatform({ ...fighter, x, y, vy }, stage, ignoreOneWayPlatforms);
             if (floorY !== null && vy >= 0) {
                 y = floorY;
                 vy = 0;
@@ -1736,6 +2040,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 vx,
                 vy,
                 facing,
+                dropThroughUntil: floorY !== null ? 0 : fighter.dropThroughUntil,
             };
 
             if (next.hp <= 0) {
@@ -1744,11 +2049,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
             if (now >= next.stateLockUntil) {
                 if (!grounded && next.vy !== 0) {
-                    next = setState(next, next.vy < 0 ? "jump" : "fall", now);
+                    next = { ...setState(next, next.vy < 0 ? "jump" : "fall", now), moveVariant: "none", attackHasConnected: false };
                 } else if (Math.abs(next.vx) > 1.4) {
-                    next = setState(next, "run", now);
+                    next = { ...setState(next, "run", now), moveVariant: "none", attackHasConnected: false };
                 } else {
-                    next = setState(next, "idle", now);
+                    next = { ...setState(next, "idle", now), moveVariant: "none", attackHasConnected: false };
                 }
             }
 
@@ -1756,13 +2061,22 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         };
 
         const processMeleeHit = (attacker: FighterRuntime, defender: FighterRuntime, now: number) => {
-            if (attacker.state !== "attack") return { attacker, defender };
+            const canMelee =
+                attacker.state === "attack" ||
+                attacker.state === "attack2" ||
+                (attacker.state === "special" && (attacker.moveVariant === "upSpecial" || attacker.moveVariant === "downSpecial"));
+            if (!canMelee) return { attacker, defender };
             if (attacker.attackHasConnected) return { attacker, defender };
-            if (attacker.frameIndex < attacker.attackHitFrame) return { attacker, defender };
+            const hitFrame =
+                attacker.moveVariant === "dash" ? Math.max(1, attacker.attackHitFrame - 2) :
+                    attacker.moveVariant === "altNormal" ? Math.max(1, attacker.attackHitFrame - 1) :
+                        attacker.attackHitFrame;
+            if (attacker.frameIndex < hitFrame) return { attacker, defender };
 
             // Attack hitbox scales with character render size
             const charDef = attacker.id === "p1" ? p1Pick : p2Pick;
-            const atkReach = (charDef?.renderScale ?? 1) * 80;
+            const variantReachMul = attacker.moveVariant === "dash" ? 1.3 : attacker.moveVariant === "upSpecial" ? 1.15 : 1;
+            const atkReach = (charDef?.renderScaleX ?? 1) * 80 * variantReachMul;
             const hitBox = {
                 x: attacker.x + attacker.facing * 30 - (attacker.facing > 0 ? 0 : atkReach),
                 y: attacker.y - attacker.height * 0.78,
@@ -1787,7 +2101,12 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
             // Head hits deal 1.3x damage
             const damageMultiplier = headHit ? 1.3 : legsHit ? 0.8 : 1.0;
-            const result = applyDamage(defender, attacker, Math.round(attacker.moveSet.baseDamage * damageMultiplier), now);
+            const baseDamage =
+                attacker.moveVariant === "dash" ? Math.round(attacker.moveSet.baseDamage * 1.2) :
+                    attacker.moveVariant === "upSpecial" ? attacker.moveSet.upSpecialDamage :
+                        attacker.moveVariant === "downSpecial" ? Math.round(attacker.moveSet.counterDamage * 0.9) :
+                            attacker.moveSet.baseDamage;
+            const result = applyDamage(defender, attacker, Math.round(baseDamage * damageMultiplier), now);
 
             // Spawn attack effect sprite at the hit point
             const fxAssets = assetsRef.current;
@@ -1798,9 +2117,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     defender.x, defender.y - defender.height * 0.5, attacker.facing < 0);
             }
 
-            // Also spawn ObjectStore VFX (smear on swing, hit_effect on contact)
-            const smearVfx = getVfxById(headHit ? "smearV1" : "smearH1");
-            const hitVfx = getVfxById("hit_effect_1");
+            // Move-specific VFX
+            const fighterKey = attacker.id === "p1" ? (p1Pick?.id ?? "p1") : (p2Pick?.id ?? "p2");
+            const move = attacker.moveVariant === "none" ? "normal" : attacker.moveVariant;
+            const smearVfx = getVfxById(pickMoveVfxId(move, fighterKey, SWING_VFX_BY_MOVE));
+            const hitVfx = getVfxById(pickMoveVfxId(move, fighterKey, HIT_VFX_BY_MOVE));
             if (smearVfx) {
                 const smearImg = getVfxImage(smearVfx.id);
                 if (smearImg) spawnEffect(smearImg, smearVfx.frames, 2, attacker.x + attacker.facing * 40, attacker.y - attacker.height * 0.5, attacker.facing < 0);
@@ -1811,9 +2132,42 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             }
 
             // Screen shake and hit flash — stronger on headshots
-            triggerScreenShake(headHit ? 10 : result.wasCounter ? 12 : 6, result.wasCounter ? 200 : 120);
+            const baseShake = attacker.moveVariant === "dash" ? 11 : attacker.moveVariant === "upSpecial" ? 12 : 8;
+            triggerScreenShake(headHit ? baseShake + 3 : result.wasCounter ? 12 : baseShake, result.wasCounter ? 220 : 140);
             triggerHitFlash(defender.id as FighterId, 100);
 
+            return {
+                attacker: { ...result.attacker, attackHasConnected: true },
+                defender: result.target,
+            };
+        };
+
+        const processRescueRollHit = (attacker: FighterRuntime, defender: FighterRuntime, now: number) => {
+            if (attacker.moveVariant !== "rescue" || attacker.state !== "dodge") return { attacker, defender };
+            if (attacker.attackHasConnected) return { attacker, defender };
+            const hitBox = {
+                x: attacker.x - attacker.width * 0.45,
+                y: attacker.y - attacker.height * 0.78,
+                w: attacker.width * 0.9,
+                h: attacker.height * 0.65,
+            };
+            if (!intersectRect(hitBox, hurtBox(defender))) return { attacker, defender };
+            if (defender.invulnUntil > now) return { attacker: { ...attacker, attackHasConnected: true }, defender };
+
+            const result = applyDamage(defender, attacker, Math.round(attacker.moveSet.baseDamage * 1.1), now);
+            const fighterKey = attacker.id === "p1" ? (p1Pick?.id ?? "p1") : (p2Pick?.id ?? "p2");
+            const swingVfx = getVfxById(pickMoveVfxId("rescue", fighterKey, SWING_VFX_BY_MOVE));
+            const hitVfx = getVfxById(pickMoveVfxId("rescue", fighterKey, HIT_VFX_BY_MOVE));
+            if (swingVfx) {
+                const img = getVfxImage(swingVfx.id);
+                if (img) spawnEffect(img, swingVfx.frames, 2, attacker.x, attacker.y - attacker.height * 0.5, attacker.facing < 0);
+            }
+            if (hitVfx) {
+                const img = getVfxImage(hitVfx.id);
+                if (img) spawnEffect(img, hitVfx.frames, 2, defender.x, defender.y - defender.height * 0.5, false);
+            }
+            triggerScreenShake(13, 180);
+            triggerHitFlash(defender.id as FighterId, 120);
             return {
                 attacker: { ...result.attacker, attackHasConnected: true },
                 defender: result.target,
@@ -1825,6 +2179,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             if (!assets) return;
 
             let world = worldRef.current;
+            const stage = stageRef.current;
 
             // Process super freeze
             if (world.superFreeze) {
@@ -1892,17 +2247,53 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             nextP2 = p2Melee.attacker;
             nextP1 = p2Melee.defender;
 
+            const p1Rescue = processRescueRollHit(nextP1, nextP2, now);
+            nextP1 = p1Rescue.attacker;
+            nextP2 = p1Rescue.defender;
+
+            const p2Rescue = processRescueRollHit(nextP2, nextP1, now);
+            nextP2 = p2Rescue.attacker;
+            nextP1 = p2Rescue.defender;
+
             const nextProjectiles: Projectile[] = [];
             for (const projectile of world.projectiles) {
                 if (now > projectile.expiresAt) continue;
-
-                const updated = {
+                let updated = {
                     ...projectile,
                     x: projectile.x + projectile.vx,
                     y: projectile.y + projectile.vy,
                     vy: projectile.hasGravity ? projectile.vy + PROJECTILE_GRAVITY : projectile.vy,
                 };
                 if (updated.x < -100 || updated.x > ARENA_WIDTH + 100 || updated.y > 1400) continue;
+
+                if (updated.isBouncingBomb && updated.vy > 0) {
+                    const floorY = getProjectileFloorY(updated, stage);
+                    if (floorY !== null && updated.y >= floorY) {
+                        if (updated.bouncesRemaining > 0) {
+                            updated = {
+                                ...updated,
+                                y: floorY - 2,
+                                vy: -Math.max(4, Math.abs(updated.vy) * 0.62),
+                                vx: updated.vx * 0.9,
+                                bouncesRemaining: updated.bouncesRemaining - 1,
+                            };
+                            const bounceVfx = getVfxById("waterSplash") ?? getVfxById("dustCloud");
+                            if (bounceVfx) {
+                                const bounceImg = getVfxImage(bounceVfx.id);
+                                if (bounceImg) spawnEffect(bounceImg, bounceVfx.frames, 2, updated.x, floorY, false);
+                            }
+                            triggerScreenShake(5, 80);
+                        } else {
+                            const endVfx = getVfxById(updated.hitVfxId) ?? getVfxById("explosionSmall");
+                            if (endVfx) {
+                                const endImg = getVfxImage(endVfx.id);
+                                if (endImg) spawnEffect(endImg, endVfx.frames, 2, updated.x, floorY - 8, false);
+                            }
+                            triggerScreenShake(9, 120);
+                            continue;
+                        }
+                    }
+                }
 
                 const target = updated.owner === "p1" ? nextP2 : nextP1;
                 const targetBox = hurtBox(target);
@@ -1924,6 +2315,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                             vx: -updated.vx * 0.5,
                             vy: parryKb.kbY * 0.5,
                             stateLockUntil: now + parryKb.hitstun,
+                            attackHasConnected: false,
+                            moveVariant: "none",
                         }, shooter.hp <= PARRY_RECOIL_DAMAGE ? "death" : "takeHit", now);
                         if (updated.owner === "p1") nextP1 = knockedShooter;
                         else nextP2 = knockedShooter;
@@ -1956,6 +2349,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                         spawnEffect(ownerEffect, ownerDef.frames, ownerDef.hold,
                             hitTarget.x, hitTarget.y - hitTarget.height * 0.5, updated.vx < 0);
                     }
+                    const projHitVfx = getVfxById(updated.hitVfxId);
+                    if (projHitVfx) {
+                        const projHitImg = getVfxImage(projHitVfx.id);
+                        if (projHitImg) spawnEffect(projHitImg, projHitVfx.frames, 2, hitTarget.x, hitTarget.y - hitTarget.height * 0.5, false);
+                    }
                     triggerScreenShake(8, 150);
                     triggerHitFlash(hitTarget.id as FighterId, 80);
 
@@ -1965,7 +2363,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 nextProjectiles.push(updated);
             }
 
-            if (nextP1.state === "jump" && now < nextP1.stateLockUntil) {
+            if (nextP1.moveVariant === "upSpecial" && now < nextP1.stateLockUntil) {
                 const strikeBox = {
                     x: nextP1.x + nextP1.facing * 26 - (nextP1.facing > 0 ? 0 : 72),
                     y: nextP1.y - nextP1.height * 0.7,
@@ -1979,7 +2377,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 }
             }
 
-            if (nextP2.state === "jump" && now < nextP2.stateLockUntil) {
+            if (nextP2.moveVariant === "upSpecial" && now < nextP2.stateLockUntil) {
                 const strikeBox = {
                     x: nextP2.x + nextP2.facing * 26 - (nextP2.facing > 0 ? 0 : 72),
                     y: nextP2.y - nextP2.height * 0.7,
@@ -1994,7 +2392,6 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             }
 
             // Stock system: blast zone death + HP death
-            const stage = stageRef.current;
             const bz = stage.blastZone;
             const checkStockLoss = (f: FighterRuntime): FighterRuntime => {
                 const oob = f.x < bz.left || f.x > bz.right || f.y < bz.top || f.y > bz.bottom;
@@ -2012,8 +2409,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             nextP2 = checkStockLoss(nextP2);
 
             // Reset air jumps on landing
-            const landingFloorP1 = isOnPlatform(nextP1, stage);
-            const landingFloorP2 = isOnPlatform(nextP2, stage);
+            const landingFloorP1 = isOnPlatform(nextP1, stage, now < nextP1.dropThroughUntil);
+            const landingFloorP2 = isOnPlatform(nextP2, stage, now < nextP2.dropThroughUntil);
             if (landingFloorP1 !== null) nextP1 = { ...nextP1, airJumpsLeft: MAX_AIR_JUMPS };
             if (landingFloorP2 !== null) nextP2 = { ...nextP2, airJumpsLeft: MAX_AIR_JUMPS };
 
@@ -2457,8 +2854,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                         </div>
                         <div className="text-sm text-white/80 space-y-1">
                             <div>A/D: move · W: jump</div>
-                            <div className="text-emerald-300">AA / DD: dodge roll (invulnerable backflip)</div>
-                            <div>Q or E: melee · F: ranged</div>
+                            <div className="text-emerald-300">AA / DD: dodge roll (ground + air quick dodge)</div>
+                            <div className="text-cyan-300">SS: drop through floating platforms</div>
+                            <div>Q: melee 1 · E: melee 2 (ground)</div>
+                            <div className="text-sky-300">Air E: forward projectile · Air E+S: down-angle projectile</div>
+                            <div className="text-amber-300">W + LMB: rescue roll toward mouse (damages on collision)</div>
                             <div className="text-sky-300">LMB: dash attack · RMB: block/parry</div>
                             <div>W+Q/E: {p1Pick?.moveSet.upSpecialName}</div>
                             <div>S+Q/E: {p1Pick?.moveSet.downSpecialName}</div>
@@ -2476,7 +2876,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                             <div className="text-sm text-white/80 space-y-1">
                                 <div>Arrows: move + jump</div>
                                 <div className="text-emerald-300">Double-tap Left/Right: dodge roll</div>
-                                <div>/ or .: melee attack</div>
+                                <div className="text-cyan-300">Double-tap Down: drop through floating platforms</div>
+                                <div>/: melee 1 · .: melee 2</div>
                                 <div>;: ranged · ': super</div>
                                 <div>Gamepad 2: same button layout</div>
                             </div>
