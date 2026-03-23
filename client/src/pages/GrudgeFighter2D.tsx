@@ -9,6 +9,8 @@ import { preloadVfx, getVfxById, getVfxImage, drawVfxFrame, type VfxDef } from "
 import { getFaction, type FactionId } from "@/lib/factions";
 import { playSound, preloadSounds as preloadGameSounds } from "@/lib/gameSounds";
 import { getDefaultVfx } from "@/lib/defaultVfx";
+import { DEFAULT_TILE_CONFIG, STAGE_PAD_SPRITES, getAssetById } from "@/lib/mapAssets";
+import { type PlacedAsset, listMaps, loadMap, mapToStage } from "@/lib/mapStorage";
 
 type FighterId = "p1" | "p2";
 type AnimationState = "idle" | "run" | "jump" | "fall" | "attack" | "attack2" | "special" | "takeHit" | "death" | "dodge";
@@ -166,6 +168,8 @@ interface StageDefinition {
     floorColor: string;
     platformColor: string;
     bgFeatures: string; // 'castle' | 'ocean' | 'lava' | 'forest'
+    customAssets?: PlacedAsset[];
+    isCustom?: boolean;
 }
 
 const STAGES: StageDefinition[] = [
@@ -857,6 +861,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const [p1Pick, setP1Pick] = useState<CharacterDef | null>(null);
     const [p2Pick, setP2Pick] = useState<CharacterDef | null>(null);
     const [selectedStage, setSelectedStage] = useState<StageDefinition>(STAGES[0]);
+    const [customStages, setCustomStages] = useState<StageDefinition[]>([]);
     const [selectPhase, setSelectPhase] = useState<"mode" | "lobby" | "p1" | "p2" | "stage" | "fight">("mode");
     const stageRef = useRef<StageDefinition>(STAGES[0]);
     const cameraRef = useRef<CameraState>({ x: 0, y: 0, zoom: 1 });
@@ -1626,6 +1631,23 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         preloadVfx();
         preloadGameSounds();
 
+        // Preload tile sprites for stage rendering
+        const tileConfig = DEFAULT_TILE_CONFIG;
+        const tileSrcs = [
+            tileConfig.floorTopLeft, tileConfig.floorTopMid, tileConfig.floorTopRight,
+            tileConfig.floorMidLeft, tileConfig.floorMidMid, tileConfig.floorMidRight,
+            tileConfig.platformLeft, tileConfig.platformMid, tileConfig.platformRight,
+            STAGE_PAD_SPRITES[stage.id] ?? STAGE_PAD_SPRITES.battlefield,
+        ];
+        // Also preload custom map assets if present
+        const customAssetSrcs: string[] = [];
+        if (stage.customAssets) {
+            for (const ca of stage.customAssets) {
+                const def = getAssetById(ca.assetId);
+                if (def) customAssetSrcs.push(def.src);
+            }
+        }
+
         Promise.all([
             loadSpriteSet(p1Pick.sprites),
             loadSpriteSet(p2Pick.sprites),
@@ -1635,16 +1657,30 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             maybeLoad(p2Pick.attackEffect.src),
             maybeLoad(p1Pick.projectileSrc),
             maybeLoad(p2Pick.projectileSrc),
+            ...tileSrcs.map(s => loadImage(s).catch(() => null)),
+            ...customAssetSrcs.map(s => loadImage(s).catch(() => null)),
         ])
-            .then(([p1, p2, background, castle, p1Effect, p2Effect, p1Proj, p2Proj]) => {
+            .then((results) => {
                 if (disposed) return;
+                const [p1, p2, background, castle, p1Effect, p2Effect, p1Proj, p2Proj, ...tileResults] = results;
                 assetsRef.current = {
-                    p1, p2, background, castle,
+                    p1: p1 as Record<AnimationState, RuntimeSprite>,
+                    p2: p2 as Record<AnimationState, RuntimeSprite>,
+                    background: background as HTMLImageElement,
+                    castle: castle as HTMLImageElement,
                     p1Effect: p1Effect as HTMLImageElement | null,
                     p2Effect: p2Effect as HTMLImageElement | null,
                     p1Projectile: p1Proj as HTMLImageElement | null,
                     p2Projectile: p2Proj as HTMLImageElement | null,
                 };
+                // Store tile images in a map by src
+                const tileImgs = new Map<string, HTMLImageElement>();
+                const allSrcs = [...tileSrcs, ...customAssetSrcs];
+                for (let i = 0; i < allSrcs.length; i++) {
+                    const img = tileResults[i] as HTMLImageElement | null;
+                    if (img) tileImgs.set(allSrcs[i], img);
+                }
+                (window as any).__stageTileImages = tileImgs;
                 activeEffectsRef.current = [];
                 setIsReady(true);
             })
@@ -1911,40 +1947,111 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             ctx.scale(cam.zoom, cam.zoom);
             ctx.translate(-cam.x, -cam.y);
 
-            // Draw main floor — thick solid platform
-            const floorH = 50;
-            ctx.fillStyle = stage.floorColor;
-            ctx.fillRect(stage.mainFloorX, stage.mainFloorY, stage.mainFloorW, floorH);
-            // Top edge highlight
-            ctx.fillStyle = 'rgba(255,255,255,0.2)';
-            ctx.fillRect(stage.mainFloorX, stage.mainFloorY, stage.mainFloorW, 4);
-            // Bottom darker edge
-            ctx.fillStyle = 'rgba(0,0,0,0.3)';
-            ctx.fillRect(stage.mainFloorX, stage.mainFloorY + floorH - 6, stage.mainFloorW, 6);
-            // Left/right edges
-            ctx.fillStyle = 'rgba(0,0,0,0.2)';
-            ctx.fillRect(stage.mainFloorX, stage.mainFloorY, 4, floorH);
-            ctx.fillRect(stage.mainFloorX + stage.mainFloorW - 4, stage.mainFloorY, 4, floorH);
+            // ─── Draw custom map assets (bg + main layers) ─────────────
+            const tileImgs = (window as any).__stageTileImages as Map<string, HTMLImageElement> | undefined;
+            if (stage.customAssets) {
+                for (const layer of ['bg', 'main'] as const) {
+                    for (const ca of stage.customAssets.filter(a => a.layer === layer)) {
+                        const def = getAssetById(ca.assetId);
+                        if (!def) continue;
+                        const img = tileImgs?.get(def.src);
+                        if (img) {
+                            ctx.save();
+                            ctx.imageSmoothingEnabled = false;
+                            if (ca.flipX) {
+                                ctx.translate(ca.x + ca.w, ca.y);
+                                ctx.scale(-1, 1);
+                                ctx.drawImage(img, 0, 0, ca.w, ca.h);
+                            } else {
+                                ctx.drawImage(img, ca.x, ca.y, ca.w, ca.h);
+                            }
+                            ctx.restore();
+                        }
+                    }
+                }
+            }
 
-            // Draw platforms — thick with visible edges
+            // Draw main floor with tile sprites
+            const tileConfig = DEFAULT_TILE_CONFIG;
+            const floorH = 64;
+            const tileSize = 32; // tile rendering size on canvas
+            const tilesAcross = Math.ceil(stage.mainFloorW / tileSize);
+            const tilesDown = Math.ceil(floorH / tileSize);
+            ctx.save();
+            ctx.imageSmoothingEnabled = false;
+            for (let row = 0; row < tilesDown; row++) {
+                for (let col = 0; col < tilesAcross; col++) {
+                    const tx = stage.mainFloorX + col * tileSize;
+                    const ty = stage.mainFloorY + row * tileSize;
+                    let src: string;
+                    if (row === 0) {
+                        src = col === 0 ? tileConfig.floorTopLeft : col === tilesAcross - 1 ? tileConfig.floorTopRight : tileConfig.floorTopMid;
+                    } else {
+                        src = col === 0 ? tileConfig.floorMidLeft : col === tilesAcross - 1 ? tileConfig.floorMidRight : tileConfig.floorMidMid;
+                    }
+                    const timg = tileImgs?.get(src);
+                    if (timg) {
+                        ctx.drawImage(timg, tx, ty, tileSize, tileSize);
+                    } else {
+                        ctx.fillStyle = stage.floorColor;
+                        ctx.fillRect(tx, ty, tileSize, tileSize);
+                    }
+                }
+            }
+            ctx.restore();
+
+            // Draw platforms with pad sprites
+            const padSrc = STAGE_PAD_SPRITES[stage.id] ?? STAGE_PAD_SPRITES.battlefield;
+            const padImg = tileImgs?.get(padSrc);
             for (const p of stage.platforms) {
-                const platH = 24;
-                ctx.fillStyle = stage.platformColor;
-                ctx.fillRect(p.x, p.y, p.w, platH);
-                // Top edge bright highlight
-                ctx.fillStyle = 'rgba(255,255,255,0.25)';
-                ctx.fillRect(p.x, p.y, p.w, 3);
-                // Bottom shadow
-                ctx.fillStyle = 'rgba(0,0,0,0.3)';
-                ctx.fillRect(p.x, p.y + platH - 4, p.w, 4);
-                // Rounded corner illusion
-                ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                ctx.fillRect(p.x + 2, p.y + 3, p.w - 4, platH - 7);
+                const platH = 32;
+                ctx.save();
+                ctx.imageSmoothingEnabled = false;
+                if (padImg) {
+                    ctx.drawImage(padImg, p.x, p.y, p.w, platH);
+                } else {
+                    // Fallback: use platform tiles (left + mid + right)
+                    const platTileW = tileSize;
+                    const platCols = Math.ceil(p.w / platTileW);
+                    for (let col = 0; col < platCols; col++) {
+                        const px = p.x + col * platTileW;
+                        const src = col === 0 ? tileConfig.platformLeft : col === platCols - 1 ? tileConfig.platformRight : tileConfig.platformMid;
+                        const ptimg = tileImgs?.get(src);
+                        if (ptimg) {
+                            ctx.drawImage(ptimg, px, p.y, platTileW, platH);
+                        } else {
+                            ctx.fillStyle = stage.platformColor;
+                            ctx.fillRect(px, p.y, platTileW, platH);
+                        }
+                    }
+                }
+                ctx.restore();
             }
 
             // Fighters
             drawFighter(world.p1, assets.p1);
             drawFighter(world.p2, assets.p2);
+
+            // ─── Draw custom map assets (fg layer — in front of fighters) ─
+            if (stage.customAssets) {
+                for (const ca of stage.customAssets.filter(a => a.layer === 'fg')) {
+                    const def = getAssetById(ca.assetId);
+                    if (!def) continue;
+                    const img = tileImgs?.get(def.src);
+                    if (img) {
+                        ctx.save();
+                        ctx.imageSmoothingEnabled = false;
+                        if (ca.flipX) {
+                            ctx.translate(ca.x + ca.w, ca.y);
+                            ctx.scale(-1, 1);
+                            ctx.drawImage(img, 0, 0, ca.w, ca.h);
+                        } else {
+                            ctx.drawImage(img, ca.x, ca.y, ca.w, ca.h);
+                        }
+                        ctx.restore();
+                    }
+                }
+            }
 
             // Debug collision overlay (toggle with ` key)
             if (debugBoxesRef.current) {
@@ -3086,11 +3193,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                             <img src="/fighter2d/effects/slash_arc.png" alt="" className="w-5 h-5 object-contain" style={{ imageRendering: 'pixelated' }} />
                             Character Editor
                         </button>
-                        <a href="https://molochdagod.github.io/Grudge-RPG-Sprite-Attack/" target="_blank"
-                            className="flex items-center gap-2 justify-center py-2.5 rounded-lg text-sm font-semibold border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all text-center">
-                            <img src="/favicon.png" alt="" className="w-5 h-5 rounded-full" />
-                            Landing Page
-                        </a>
+                        <button onClick={() => { window.location.hash = 'mapadmin'; }}
+                            className="flex items-center gap-2 justify-center py-2.5 rounded-lg text-sm font-semibold border border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/15 hover:border-emerald-500/40 transition-all text-emerald-300">
+                            <img src="/mapassets/tileset/Tiles/Tileset/TileSet_02.png" alt="" className="w-5 h-5 object-contain" style={{ imageRendering: 'pixelated' }} />
+                            Map Editor
+                        </button>
                     </div>
 
                     {/* Links row */}
@@ -3192,7 +3299,22 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     }
 
     // ─── STAGE SELECT SCREEN ─────────────────────────────────────
+    // Load custom maps when entering stage select
+    useEffect(() => {
+        if (selectPhase !== "stage") return;
+        (async () => {
+            const maps = await listMaps();
+            const loaded: StageDefinition[] = [];
+            for (const m of maps) {
+                const data = await loadMap(m.id);
+                if (data) loaded.push(mapToStage(data) as unknown as StageDefinition);
+            }
+            setCustomStages(loaded);
+        })();
+    }, [selectPhase]);
+
     if (selectPhase === "stage") {
+        const allStages = [...STAGES, ...customStages];
         return (
             <div className="min-h-screen bg-slate-950 text-white p-4 md:p-6">
                 <div className="max-w-[900px] mx-auto space-y-6">
@@ -3207,7 +3329,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                         <p className="text-white/50 mt-1">{p1Pick?.name} vs {p2Pick?.name}</p>
                     </div>
                     <div className="grid grid-cols-2 gap-6">
-                        {STAGES.map(stage => (
+                        {allStages.map(stage => (
                             <button
                                 key={stage.id}
                                 onClick={() => { setSelectedStage(stage); stageRef.current = stage; setSelectPhase("fight"); }}
@@ -3228,7 +3350,10 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                                     </div>
                                 </div>
                                 <h3 className="text-lg font-bold text-white">{stage.name}</h3>
-                                <p className="text-xs text-white/50">{stage.platforms.length} platforms · {stage.bgFeatures} theme</p>
+                                <p className="text-xs text-white/50">
+                                    {stage.platforms.length} platforms · {stage.bgFeatures} theme
+                                    {stage.isCustom && <span className="text-emerald-400 ml-1">· Custom</span>}
+                                </p>
                             </button>
                         ))}
                     </div>

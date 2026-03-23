@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { PuterAuthProvider } from "@/contexts/PuterAuthContext";
 import GrudgeFighter2D from "@/pages/GrudgeFighter2D";
 import ToonAdmin from "@/pages/ToonAdmin";
+import MapAdmin from "@/pages/MapAdmin";
 function StartupIntro({ onComplete }: { onComplete: () => void }) {
   const [showSkip, setShowSkip] = useState(false);
 
@@ -59,6 +60,11 @@ function GameApp() {
   // /toonadmin route
   if (route === "#toonadmin" || route === "#/toonadmin") {
     return <ToonAdmin onBack={() => { window.location.hash = ""; }} />;
+  }
+
+  // /mapadmin route
+  if (route === "#mapadmin" || route === "#/mapadmin") {
+    return <MapAdmin onBack={() => { window.location.hash = ""; }} />;
   }
 
   return <GrudgeFighter2D onBack={() => window.location.reload()} />;

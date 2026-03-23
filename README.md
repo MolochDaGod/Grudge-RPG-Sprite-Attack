@@ -5,6 +5,7 @@ A 2D sprite-based fighting game with 39 playable characters across 3 factions, A
 **Play Now:** [grudge-rpg-sprite-attack.vercel.app](https://grudge-rpg-sprite-attack-grudgenexus.vercel.app)
 **Landing Page:** [molochdagod.github.io/Grudge-RPG-Sprite-Attack](https://molochdagod.github.io/Grudge-RPG-Sprite-Attack)
 **Character Editor:** [#toonadmin](https://grudge-rpg-sprite-attack-grudgenexus.vercel.app/#toonadmin)
+**Map Editor:** [#mapadmin](https://grudge-rpg-sprite-attack-grudgenexus.vercel.app/#mapadmin)
 **PvP Server:** [grudge-pvp-server-production.up.railway.app](https://grudge-pvp-server-production.up.railway.app)
 
 ## Features
@@ -90,13 +91,33 @@ Professional editor at `#toonadmin` for all 39 characters:
 - Remap animations, adjust hold/loop, edit ATK/SPD/Super stats
 - Import/Export JSON configs, faction badge per character
 
+### Map Editor — Stage Builder at `#mapadmin`
+Full 2D map editor for creating custom playable stages:
+- **Asset Browser** — 160+ sprites across 13 categories (tiles, platforms, props, trees, rocks, grass, boxes, spikes, ladders, signs, food/bonus, animated, backgrounds) from CraftPix tileset and jump-items packs
+- **Drag & Drop** — drag assets from the left panel onto the canvas, or click to place with grid snapping (32px)
+- **Layer System** — place assets on Background, Main, or Foreground layers for proper render ordering
+- **Canvas Editor** — zoomable/pannable canvas (scroll wheel zoom, middle-click pan) with grid overlay and coordinate HUD
+- **Stage Properties** — configure background colors, theme (castle/ocean/lava/forest), main floor position/width, and blast zones
+- **Platform Editor** — add/remove one-way platforms with per-platform X/Y/W controls
+- **Asset Properties** — resize, flip, toggle collider, change layer for any placed asset
+- **Tools** — Select (1), Place (2), Erase (3), Add Platform, Set Floor; right-click to delete; Delete key removes selected
+- **Save/Load** — saves to Puter account (falls back to localStorage); load saved maps from a list
+- **Export/Import** — export maps as JSON files, import from JSON
+- **Playable in Game** — saved maps appear in stage select as "Custom" stages with full sprite rendering
+
+### Sprite-Based Stage Rendering
+All 4 built-in stages now render with real pixel art sprites instead of colored rectangles:
+- **Main floor** — composited from individual tileset pieces (corner + edge + fill tiles)
+- **Floating platforms** — rendered with CraftPix pad sprites (each stage has a unique pad style)
+- **Custom map assets** — placed decorations and tiles render in correct layer order (bg → main → fighters → fg)
+
 ## Tech Stack
 
 - **Frontend** — React 18, Vite 6, Tailwind CSS, Canvas 2D, Howler.js (audio)
 - **PvP Server** — Node.js + Socket.io on Railway
 - **Backend** — Express, PostgreSQL (Drizzle ORM), Grudge Studio backend
 - **Deployment** — Vercel (frontend), Railway (PvP), Docker (fullstack)
-- **Assets** — Zerie Tiny RPG (2x scale), CraftPix Wizard + RPG Heroes, GRUDA Wars (48–200px frames, scaled to 300px)
+- **Assets** — Zerie Tiny RPG (2x scale), CraftPix Wizard + RPG Heroes, CraftPix Platformer Tileset + Jump Items, GRUDA Wars (48–200px frames, scaled to 300px)
 
 ## Quick Start
 
@@ -114,18 +135,24 @@ client/
   src/
     pages/GrudgeFighter2D.tsx    # Main fighter game (ellipse collision, factions, debug overlay)
     pages/ToonAdmin.tsx          # ToonAdmin Pro sprite animation studio
+    pages/MapAdmin.tsx           # Map Editor — 2D stage builder with drag-drop
     hooks/usePvP.ts              # Socket.io PvP client hook
     lib/grudaRoster.ts           # 39-character roster data with faction assignments
     lib/factions.ts              # Faction definitions (Crusade, Legion, Fabled)
     lib/gameSounds.ts            # Howler.js sound system (20 SFX types, pooled, pitch-randomized)
     lib/vfxLibrary.ts            # Dynamic VFX library (143+ from ObjectStore API)
     lib/charConfig.ts            # Character config persistence (server + localStorage)
+    lib/mapAssets.ts             # Map editor asset registry (160+ sprites, 13 categories)
+    lib/mapStorage.ts            # Custom map save/load via Puter KV (+ localStorage fallback)
   public/fighter2d/
     characters/                  # 39 character sprite folders
     effects/                     # Attack effect sprite strips
     projectiles/                 # Arrow, fireball, bullet, axe sprites
     image/factions/              # Faction emblem PNGs (crusade, legion, fabled)
     sfx/                         # Game sound effects (MP3)
+  public/mapassets/
+    jump-items/                  # CraftPix platform pads, props, bonus pickups
+    tileset/                     # CraftPix platformer tiles, objects, backgrounds
   public/startup-intro.mp4       # Startup cinematic
   public/landing-bg.jpg          # Landing page hero background
 server/
