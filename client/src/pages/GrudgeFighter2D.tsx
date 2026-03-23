@@ -876,6 +876,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const [loadError, setLoadError] = useState<string | null>(null);
     const [hud, setHud] = useState({ p1Hp: 200, p2Hp: 200, p1Super: 0, p2Super: 0, p1Stocks: STARTING_STOCKS, p2Stocks: STARTING_STOCKS, p1AirJumps: MAX_AIR_JUMPS, p2AirJumps: MAX_AIR_JUMPS, winner: null as FighterId | null, elapsed: 0 });
     const [vsAI, setVsAI] = useState(true);
+    const vsAIRef = useRef(true);
+    const isOnlineRef = useRef(false);
     const aiTimerRef = useRef(0);
     const mouseScreenRef = useRef({ x: VIEWPORT_W / 2, y: VIEWPORT_H / 2 });
     const mouseWorldRef = useRef({ x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2 });
@@ -1117,7 +1119,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 {
                     ...actor,
                     stamina: actor.stamina - STAMINA_COST_SPECIAL,
-                    vy: -actor.moveSet.jumpForce * 0.95,
+                    vy: -(actor.moveSet?.jumpForce ?? 16) * 0.95,
                     vx: actor.facing * 8,
                     stateLockUntil: now + 340,
                     specialCooldownUntil: now + 1050,
@@ -1159,11 +1161,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         const stage = stageRef.current;
         const grounded = stage ? isOnPlatform(actor, stage) !== null : actor.y >= 600;
         if (grounded) {
-            const next = setState({ ...actor, vy: -actor.moveSet.jumpForce * SPEED_SCALE, airJumpsLeft: MAX_AIR_JUMPS, moveVariant: "none", attackHasConnected: false }, "jump", now);
+            const next = setState({ ...actor, vy: -(actor.moveSet?.jumpForce ?? 16) * SPEED_SCALE, airJumpsLeft: MAX_AIR_JUMPS, moveVariant: "none", attackHasConnected: false }, "jump", now);
             if (fighterId === "p1") world.p1 = next; else world.p2 = next;
             playSound("jump");
         } else if (actor.airJumpsLeft > 0) {
-            const next = setState({ ...actor, vy: -actor.moveSet.jumpForce * SPEED_SCALE * 0.85, airJumpsLeft: actor.airJumpsLeft - 1, moveVariant: "none", attackHasConnected: false }, "jump", now);
+            const next = setState({ ...actor, vy: -(actor.moveSet?.jumpForce ?? 16) * SPEED_SCALE * 0.85, airJumpsLeft: actor.airJumpsLeft - 1, moveVariant: "none", attackHasConnected: false }, "jump", now);
             if (fighterId === "p1") world.p1 = next; else world.p2 = next;
             playSound("jump");
         }
@@ -1456,6 +1458,10 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     // In PvP, determine which fighter this client controls
     const myFighter: FighterId = pvp.mySlot === "p2" ? "p2" : "p1";
     const isOnline = pvp.state === "fighting";
+
+    // Keep refs in sync so the game loop closure always reads current values
+    vsAIRef.current = vsAI;
+    isOnlineRef.current = isOnline;
 
     // Handle remote PvP actions from opponent
     const remoteKeysRef = useRef<Set<string>>(new Set());
@@ -2735,7 +2741,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         const loop = (now: number) => {
             if (now - previousTime > 13) {
                 previousTime = now;
-                if (vsAI) runAI(now);
+                if (vsAIRef.current && !isOnlineRef.current) runAI(now);
                 pollGamepads();
                 updateWorld(now);
             }
