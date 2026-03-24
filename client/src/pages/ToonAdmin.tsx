@@ -2,8 +2,25 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { GRUDA_ROSTER, type GrudaCharDef } from "@/lib/grudaRoster";
 import { ACTION_SLOTS, type ActionSlotKey, type CharOverrides, loadOverrides, setCharOverrides, deleteCharOverrides, exportAllOverrides, importOverrides, saveOverridesToServer } from "@/lib/charConfig";
 import { getAllVfx, getVfxCategories, searchVfx, preloadVfx, getVfxById, getVfxImage, drawVfxFrame, type VfxDef } from "@/lib/vfxLibrary";
-import { getFaction } from "@/lib/factions";
+import { getFaction, FACTION_IDS } from "@/lib/factions";
 import { getDefaultVfx } from "@/lib/defaultVfx";
+
+// ─── Editor types ────────────────────────────────────────────────
+type CanvasElement = "sprite" | "head" | "body" | "legs" | "weapon" | "platform" | "floor" | null;
+
+interface ContextMenuState {
+  x: number;
+  y: number;
+  visible: boolean;
+  element: CanvasElement;
+}
+
+const EDITOR_STAGES = [
+  { id: "battlefield", name: "Grudge Battlefield" },
+  { id: "pirate", name: "Pirate's Cove" },
+  { id: "fortress", name: "Dark Fortress" },
+  { id: "canopy", name: "Elven Canopy" },
+];
 
 // ─── Helpers ─────────────────────────────────────────────────────
 function getCharAnims(char: GrudaCharDef): { key: string; file: string; frames: number }[] {
@@ -83,6 +100,14 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
   const [serverStatus, setServerStatus] = useState<"saved" | "saving" | "offline" | "">(""); 
   const [vfxLoaded, setVfxLoaded] = useState(false);
 
+  // ─── Editor interaction state ──────────────────────────────────
+  const [selectedElement, setSelectedElement] = useState<CanvasElement>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>({ x: 0, y: 0, visible: false, element: null });
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["toons", "crusade", "legion", "fabled", "maps"]));
+  const [selectedMapId, setSelectedMapId] = useState<string | null>(null);
+  const hitRegionsRef = useRef<{ id: CanvasElement; x: number; y: number; w: number; h: number }[]>([]);
+  const selectedElementRef = useRef<CanvasElement>(null);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const frameRef = useRef(0);
@@ -98,6 +123,56 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
   useEffect(() => { preloadVfx().then(() => setVfxLoaded(true)); }, []);
 
   const showToast = useCallback((msg: string) => { setToast(msg); setTimeout(() => setToast(""), 2500); }, []);
+
+  // Keep ref in sync for render loop
+  useEffect(() => { selectedElementRef.current = selectedElement; }, [selectedElement]);
+
+  // Close context menu on outside click
+  useEffect(() => {
+    if (!contextMenu.visible) return;
+    const close = () => setContextMenu(prev => ({ ...prev, visible: false }));
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [contextMenu.visible]);
+
+  const getCanvasPos = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    return { x: (e.clientX - rect.left) * (STAGE_W / rect.width), y: (e.clientY - rect.top) * (STAGE_H / rect.height) };
+  }, []);
+
+  const hitTestCanvas = useCallback((px: number, py: number): CanvasElement => {
+    for (let i = hitRegionsRef.current.length - 1; i >= 0; i--) {
+      const r = hitRegionsRef.current[i];
+      if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) return r.id;
+    }
+    return null;
+  }, []);
+
+  const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const pos = getCanvasPos(e);
+    if (!pos) return;
+    setSelectedElement(hitTestCanvas(pos.x, pos.y));
+    setContextMenu(prev => ({ ...prev, visible: false }));
+  }, [getCanvasPos, hitTestCanvas]);
+
+  const handleCanvasRightClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const pos = getCanvasPos(e);
+    if (!pos) return;
+    const el = hitTestCanvas(pos.x, pos.y);
+    setSelectedElement(el);
+    setContextMenu({ x: e.clientX, y: e.clientY, visible: true, element: el });
+  }, [getCanvasPos, hitTestCanvas]);
+
+  const toggleGroup = useCallback((groupId: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId); else next.add(groupId);
+      return next;
+    });
+  }, []);
 
   // Current animation source
   const getSlotAnim = (slot: ActionSlotKey) => {
@@ -136,6 +211,7 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
     let raf: number;
     const render = () => {
       ctx.clearRect(0, 0, STAGE_W, STAGE_H);
+      hitRegionsRef.current = [];
 
       // Dark background
       ctx.fillStyle = "#111";
@@ -152,12 +228,14 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
       ctx.fillRect(0, FLOOR_Y, STAGE_W, 6);
       ctx.fillStyle = "rgba(255,255,255,0.1)";
       ctx.fillRect(0, FLOOR_Y, STAGE_W, 2);
+      hitRegionsRef.current.push({ id: "floor", x: 0, y: FLOOR_Y - 10, w: STAGE_W, h: 26 });
 
       // Platform
       ctx.fillStyle = "#3a5a3a";
       ctx.fillRect(PLATFORM_X, PLATFORM_Y, PLATFORM_W, 5);
       ctx.fillStyle = "rgba(255,255,255,0.12)";
       ctx.fillRect(PLATFORM_X, PLATFORM_Y, PLATFORM_W, 2);
+      hitRegionsRef.current.push({ id: "platform", x: PLATFORM_X, y: PLATFORM_Y - 10, w: PLATFORM_W, h: 25 });
 
       // Character sprite
       const img = imgRef.current;
@@ -190,6 +268,7 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
 
         // Current frame
         ctx.drawImage(img, frameRef.current * fw, 0, fw, fh, drawX, drawY, dw, dh);
+        hitRegionsRef.current.push({ id: "sprite", x: drawX, y: drawY, w: dw, h: dh });
 
         // Collision overlay
         if (showCollision) {
@@ -198,6 +277,9 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
           const scX = char.renderScaleX ?? (char.renderScale !== undefined && isSmall ? (char.renderScale ?? 1) * 0.75 : (char.renderScale ?? (isSmall ? 1.5 : 1)));
           const colW = Math.round(80 * Math.max(0.6, Math.min(scX, 2.0)));
           const colH = Math.round(160 * Math.max(0.6, Math.min(scY, 2.0)));
+          hitRegionsRef.current.push({ id: "head", x: cx - colW * 0.3, y: cy - colH, w: colW * 0.6, h: colH * 0.25 });
+          hitRegionsRef.current.push({ id: "body", x: cx - colW * 0.4, y: cy - colH * 0.75, w: colW * 0.8, h: colH * 0.4 });
+          hitRegionsRef.current.push({ id: "legs", x: cx - colW * 0.35, y: cy - colH * 0.35, w: colW * 0.7, h: colH * 0.35 });
           const eCx = cx;
           const eCy = cy - colH / 2;
           const eRx = colW / 2;
@@ -247,6 +329,7 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
           const isAttack = previewAnimKey === "attack" || previewAnimKey === "attack2" || previewAnimKey === "special";
           if (isAttack) {
             const atkReach = scX * 80;
+            hitRegionsRef.current.push({ id: "weapon", x: cx + 30, y: cy - colH * 0.78, w: atkReach, h: colH * 0.5 });
             ctx.save();
             ctx.strokeStyle = "#f472b6";
             ctx.lineWidth = 2;
@@ -293,6 +376,27 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
               drawVfxFrame(ctx, vfx, vfxFrame, cx + 40, cy - 60, 2, false);
             }
           }
+        }
+      }
+
+      // Selection highlight (drawn on top of everything)
+      const sel = selectedElementRef.current;
+      if (sel) {
+        const region = hitRegionsRef.current.find(r => r.id === sel);
+        if (region) {
+          ctx.save();
+          ctx.strokeStyle = "#fbbf24";
+          ctx.lineWidth = 2;
+          ctx.globalAlpha = 0.9;
+          ctx.setLineDash([5, 3]);
+          ctx.strokeRect(region.x - 1, region.y - 1, region.w + 2, region.h + 2);
+          // Label
+          ctx.fillStyle = "#fbbf24";
+          ctx.globalAlpha = 0.7;
+          ctx.font = "bold 9px monospace";
+          ctx.setLineDash([]);
+          ctx.fillText(sel.toUpperCase(), region.x, region.y - 4);
+          ctx.restore();
         }
       }
 
@@ -423,20 +527,58 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
       </div>
 
       <div className="flex" style={{ height: "calc(100vh - 40px)" }}>
-        {/* Left: Hero list */}
-        <div className="w-48 border-r border-white/10 overflow-y-auto bg-zinc-950 flex-shrink-0">
-          <div className="p-1.5 text-[10px] text-white/20 uppercase tracking-widest">Heroes ({GRUDA_ROSTER.length})</div>
-          {GRUDA_ROSTER.map(c => {
-            const f = getFaction(c.faction);
+        {/* Left: Hierarchy */}
+        <div className="w-52 border-r border-white/10 overflow-y-auto bg-zinc-950 flex-shrink-0">
+          {/* TOONS section */}
+          <button onClick={() => toggleGroup("toons")} className="w-full flex items-center gap-1 px-2 py-1.5 text-[10px] text-white/30 uppercase tracking-widest hover:bg-white/5 font-bold">
+            <span className="text-[8px]">{expandedGroups.has("toons") ? "▼" : "▶"}</span>
+            TOONS ({GRUDA_ROSTER.length})
+          </button>
+          {expandedGroups.has("toons") && FACTION_IDS.map(fid => {
+            const fac = getFaction(fid);
+            const chars = GRUDA_ROSTER.filter(c => c.faction === fid);
             return (
-              <button key={c.id} onClick={() => { setSelectedId(c.id); setPreviewAnimKey(null); frameRef.current = 0; }}
-                className={`w-full text-left px-2 py-1.5 text-[11px] flex items-center gap-1.5 ${selectedId === c.id ? "bg-red-900/30 border-l-2 border-red-500 text-white" : "hover:bg-white/5 text-white/50 border-l-2 border-transparent"}`}>
-                <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: f.colorPrimary }} />
-                <span className="truncate">{c.name}</span>
-                {overrides[c.id] && <span className="text-red-400 text-[8px] ml-auto">M</span>}
-              </button>
+              <div key={fid}>
+                <button onClick={() => toggleGroup(fid)}
+                  className="w-full flex items-center gap-1.5 px-3 py-1 text-[10px] hover:bg-white/5"
+                  style={{ color: fac.colorPrimary + "aa" }}>
+                  <span className="text-[8px]">{expandedGroups.has(fid) ? "▼" : "▶"}</span>
+                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: fac.colorPrimary }} />
+                  {fac.name} ({chars.length})
+                </button>
+                {expandedGroups.has(fid) && chars.map(c => (
+                  <button key={c.id}
+                    onClick={() => { setSelectedId(c.id); setSelectedMapId(null); setPreviewAnimKey(null); frameRef.current = 0; }}
+                    className={`w-full text-left pl-7 pr-2 py-1 text-[11px] flex items-center gap-1.5 ${
+                      selectedId === c.id && !selectedMapId
+                        ? "bg-red-900/30 border-l-2 border-red-500 text-white"
+                        : "hover:bg-white/5 text-white/50 border-l-2 border-transparent"
+                    }`}>
+                    <span className="truncate">{c.name}</span>
+                    {overrides[c.id] && <span className="text-red-400 text-[8px] ml-auto">M</span>}
+                  </button>
+                ))}
+              </div>
             );
           })}
+
+          {/* MAPS section */}
+          <button onClick={() => toggleGroup("maps")} className="w-full flex items-center gap-1 px-2 py-1.5 text-[10px] text-white/30 uppercase tracking-widest hover:bg-white/5 font-bold mt-1 border-t border-white/5 pt-2">
+            <span className="text-[8px]">{expandedGroups.has("maps") ? "▼" : "▶"}</span>
+            MAPS ({EDITOR_STAGES.length})
+          </button>
+          {expandedGroups.has("maps") && EDITOR_STAGES.map(s => (
+            <button key={s.id}
+              onClick={() => { setSelectedMapId(s.id); showToast(`Map: ${s.name}`); }}
+              className={`w-full text-left pl-5 pr-2 py-1 text-[11px] flex items-center gap-1.5 ${
+                selectedMapId === s.id
+                  ? "bg-amber-900/20 border-l-2 border-amber-500 text-amber-300"
+                  : "hover:bg-white/5 text-white/40 border-l-2 border-transparent"
+              }`}>
+              <span className="text-[9px]">◆</span>
+              <span className="truncate">{s.name}</span>
+            </button>
+          ))}
         </div>
 
         {/* Center: Canvas Stage */}
@@ -476,7 +618,10 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
 
           {/* Canvas */}
           <div className="flex-1 flex items-center justify-center overflow-hidden">
-            <canvas ref={canvasRef} width={STAGE_W} height={STAGE_H} className="border border-white/5 rounded" style={{ imageRendering: "pixelated" }} />
+            <canvas ref={canvasRef} width={STAGE_W} height={STAGE_H}
+              onClick={handleCanvasClick}
+              onContextMenu={handleCanvasRightClick}
+              className="border border-white/5 rounded cursor-crosshair" style={{ imageRendering: "pixelated" }} />
           </div>
 
           {/* Frame scrubber timeline */}
@@ -486,6 +631,7 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
               <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: faction.colorPrimary + "30", color: faction.colorPrimary }}>{faction.name}</span>
               <span className="text-[9px] text-white/20">{char.frameSize}px</span>
               <span className="text-[9px] text-white/20">ATK {char.atk} SPD {char.spd}</span>
+              {selectedElement && <span className="text-amber-400 text-[9px] px-1.5 py-0.5 rounded bg-amber-400/10 border border-amber-400/20">⬡ {selectedElement}</span>}
               {previewAnimKey && <span className="text-red-400 text-[9px] ml-auto">{previewAnimKey}</span>}
             </div>
             <div className="h-6 bg-zinc-800 rounded cursor-pointer relative" onClick={handleScrubberClick}>
@@ -498,7 +644,7 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
               {/* Playhead */}
               <div className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-10" style={{ left: `${(frame / Math.max(1, totalFrames)) * 100}%` }} />
             </div>
-            <div className="text-[8px] text-white/20 mt-0.5">Arrow keys: step frames | Space: play/pause</div>
+      <div className="text-[8px] text-white/20 mt-0.5">Arrow keys: step frames | Space: play/pause | LMB: select | RMB: context menu</div>
           </div>
 
           {/* Animation strip */}
@@ -662,6 +808,101 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
           </div>
         </div>
       </div>
+
+      {/* Context Menu */}
+      {contextMenu.visible && (
+        <div className="fixed z-[60] min-w-[180px] max-h-[400px] overflow-y-auto bg-zinc-900 border border-white/15 rounded-lg shadow-2xl py-1 text-[11px]"
+          style={{ left: Math.min(contextMenu.x, window.innerWidth - 200), top: Math.min(contextMenu.y, window.innerHeight - 300) }}
+          onClick={e => e.stopPropagation()}>
+          {/* Element header */}
+          {contextMenu.element && (
+            <div className="px-3 py-1 text-[9px] text-amber-400/70 uppercase tracking-widest border-b border-white/5 mb-0.5 font-bold">
+              ⬡ {contextMenu.element}
+            </div>
+          )}
+
+          {/* Sprite/null: show animation quick-switch */}
+          {(contextMenu.element === "sprite" || contextMenu.element === null) && (
+            <>
+              <div className="px-3 py-0.5 text-[8px] text-white/20 uppercase">Animations</div>
+              {charAnims.map(a => (
+                <button key={a.key} onClick={() => { setPreviewAnimKey(a.key); frameRef.current = 0; setFrame(0); setContextMenu(p => ({ ...p, visible: false })); }}
+                  className={`w-full text-left px-3 py-1 hover:bg-white/10 flex items-center justify-between ${
+                    previewAnimKey === a.key ? "text-red-400" : "text-white/60"
+                  }`}>
+                  <span>▶ {a.key}</span>
+                  <span className="text-white/20 text-[9px]">{a.frames}f</span>
+                </button>
+              ))}
+              <div className="border-t border-white/5 my-0.5" />
+            </>
+          )}
+
+          {/* Weapon: attack-related actions */}
+          {contextMenu.element === "weapon" && (
+            <>
+              <button onClick={() => { setPreviewAnimKey("attack"); frameRef.current = 0; setContextMenu(p => ({ ...p, visible: false })); }}
+                className="w-full text-left px-3 py-1 hover:bg-white/10 text-white/60">▶ Preview Attack</button>
+              {charAnims.find(a => a.key === "attack2") && (
+                <button onClick={() => { setPreviewAnimKey("attack2"); frameRef.current = 0; setContextMenu(p => ({ ...p, visible: false })); }}
+                  className="w-full text-left px-3 py-1 hover:bg-white/10 text-white/60">▶ Preview Attack2</button>
+              )}
+              {charAnims.find(a => a.key === "special") && (
+                <button onClick={() => { setPreviewAnimKey("special"); frameRef.current = 0; setContextMenu(p => ({ ...p, visible: false })); }}
+                  className="w-full text-left px-3 py-1 hover:bg-white/10 text-white/60">▶ Preview Special</button>
+              )}
+              <div className="border-t border-white/5 my-0.5" />
+            </>
+          )}
+
+          {/* Collision zone info */}
+          {(contextMenu.element === "head" || contextMenu.element === "body" || contextMenu.element === "legs") && (
+            <>
+              <div className="px-3 py-1 text-white/40 flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full" style={{ background: contextMenu.element === "head" ? "#ef4444" : contextMenu.element === "body" ? "#22c55e" : "#3b82f6" }} />
+                {contextMenu.element.toUpperCase()} Hitzone
+              </div>
+              <div className="border-t border-white/5 my-0.5" />
+            </>
+          )}
+
+          {/* Platform / floor info */}
+          {(contextMenu.element === "platform" || contextMenu.element === "floor") && (
+            <>
+              <div className="px-3 py-1 text-white/40">
+                {contextMenu.element === "platform" ? `Platform @ Y${PLATFORM_Y}` : `Floor @ Y${FLOOR_Y}`}
+              </div>
+              <div className="border-t border-white/5 my-0.5" />
+            </>
+          )}
+
+          {/* Common toggle actions */}
+          <button onClick={() => { setShowCollision(!showCollision); setContextMenu(p => ({ ...p, visible: false })); }}
+            className="w-full text-left px-3 py-1 hover:bg-white/10 text-white/60">
+            {showCollision ? "☑" : "☐"} Collision Overlay
+          </button>
+          <button onClick={() => { setShowOnion(!showOnion); setContextMenu(p => ({ ...p, visible: false })); }}
+            className="w-full text-left px-3 py-1 hover:bg-white/10 text-white/60">
+            {showOnion ? "☑" : "☐"} Onion Skin
+          </button>
+          <button onClick={() => { setShowVfx(!showVfx); setContextMenu(p => ({ ...p, visible: false })); }}
+            className="w-full text-left px-3 py-1 hover:bg-white/10 text-white/60">
+            {showVfx ? "☑" : "☐"} VFX Preview
+          </button>
+
+          <div className="border-t border-white/5 my-0.5" />
+
+          {/* Danger zone */}
+          <button onClick={() => { resetChar(); setContextMenu(p => ({ ...p, visible: false })); }}
+            className="w-full text-left px-3 py-1 hover:bg-red-900/30 text-red-400">
+            Reset {char.name}
+          </button>
+          <button onClick={() => { setSelectedElement(null); setContextMenu(p => ({ ...p, visible: false })); }}
+            className="w-full text-left px-3 py-1 hover:bg-white/10 text-white/40">
+            Deselect
+          </button>
+        </div>
+      )}
 
       {/* Toast */}
       {toast && (
