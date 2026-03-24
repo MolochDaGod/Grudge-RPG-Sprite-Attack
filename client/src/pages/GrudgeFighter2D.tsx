@@ -3172,7 +3172,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                                 boxShadow: '0 0 20px rgba(255,180,50,0.08), inset 0 0 30px rgba(0,0,0,0.5)',
                             }}>
                             <div className="absolute inset-0 bg-gradient-to-r from-amber-900/10 via-transparent to-amber-900/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-                            <img src="/fighter2d/image/menu/pve-btn.png" alt="PVE - Single Player Battle"
+                            <img src="/fighter2d/image/menu/pve.png" alt="PVE - Single Player Battle"
                                 className="w-full h-20 object-contain py-2 relative z-10"
                                 style={{ imageRendering: 'pixelated' }} />
                             <div className="absolute bottom-1 left-0 right-0 text-center">
@@ -3189,7 +3189,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                                 boxShadow: '0 0 20px rgba(185,28,28,0.1), inset 0 0 30px rgba(0,0,0,0.5)',
                             }}>
                             <div className="absolute inset-0 bg-gradient-to-r from-red-900/10 via-transparent to-red-900/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-                            <img src="/fighter2d/image/menu/pvp-btn.png" alt="PVP - Challenge Real Players"
+                            <img src="/fighter2d/image/menu/pvp.png" alt="PVP - Challenge Real Players"
                                 className="w-full h-20 object-contain py-2 relative z-10"
                                 style={{ imageRendering: 'pixelated' }} />
                             <div className="absolute bottom-1 left-0 right-0 text-center">
