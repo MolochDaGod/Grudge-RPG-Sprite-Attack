@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { ArrowLeft, Crosshair, Shield, Zap, Wifi, Globe } from "lucide-react";
+import { ArrowLeft, Crosshair, Shield, Zap, Wifi } from "lucide-react";
 import { usePvP } from "@/hooks/usePvP";
 import { GRUDA_ROSTER, type GrudaCharDef } from "@/lib/grudaRoster";
 import { preloadVfx, getVfxById, getVfxImage, drawVfxFrame, type VfxDef } from "@/lib/vfxLibrary";
@@ -3108,6 +3108,20 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         };
     }, [selectPhase, demoP1, demoP2]);
 
+    // ─── Load custom maps (must be before conditional returns to satisfy hooks rules)
+    useEffect(() => {
+        if (selectPhase !== "stage") return;
+        (async () => {
+            const maps = await listMaps();
+            const loaded: StageDefinition[] = [];
+            for (const m of maps) {
+                const data = await loadMap(m.id);
+                if (data) loaded.push(mapToStage(data) as unknown as StageDefinition);
+            }
+            setCustomStages(loaded);
+        })();
+    }, [selectPhase]);
+
     // ─── MODE SELECT ─────────────────────────────────────────────
     if (selectPhase === "mode") {
         return (
@@ -3147,42 +3161,40 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                         <p className="text-white/20 text-[10px] mt-1 italic">{demoP1.name} vs {demoP2.name} — AI Battle in Progress</p>
                     </div>
 
-                    {/* Main action buttons — awesome animated */}
+                    {/* Main action buttons — image-based */}
                     <div className="space-y-4">
-                        {/* VS AI Button */}
+                        {/* PVE Button */}
                         <button onClick={() => { setVsAI(true); setSelectPhase("p1"); }}
-                            className="grudge-menu-btn-red w-full flex items-center gap-4 py-4 px-6 rounded-xl font-black text-xl tracking-widest transition-all duration-200 hover:scale-[1.03] active:scale-[0.98] cursor-pointer"
+                            className="group w-full relative overflow-hidden rounded-xl transition-all duration-200 hover:scale-[1.03] active:scale-[0.98] cursor-pointer"
                             style={{
-                                background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 40%, #7f1d1d 100%)',
-                                border: '1px solid rgba(255,100,100,0.3)',
+                                background: 'linear-gradient(135deg, #1a0a0a 0%, #2a1010 40%, #0a0a0a 100%)',
+                                border: '2px solid rgba(255,180,50,0.25)',
+                                boxShadow: '0 0 20px rgba(255,180,50,0.08), inset 0 0 30px rgba(0,0,0,0.5)',
                             }}>
-                            <div className="relative w-12 h-12 flex-shrink-0">
-                                <img src={demoP1.sprites.idle.src} alt="" className="w-full h-full object-contain" style={{ imageRendering: 'pixelated' }} />
-                                <div className="absolute inset-0 rounded-full" style={{ boxShadow: '0 0 12px rgba(185,28,28,0.6)' }} />
+                            <div className="absolute inset-0 bg-gradient-to-r from-amber-900/10 via-transparent to-amber-900/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            <img src="/fighter2d/image/menu/pve-btn.png" alt="PVE - Single Player Battle"
+                                className="w-full h-20 object-contain py-2 relative z-10"
+                                style={{ imageRendering: 'pixelated' }} />
+                            <div className="absolute bottom-1 left-0 right-0 text-center">
+                                <span className="text-[9px] font-medium tracking-[0.3em] text-amber-300/40 uppercase">Single Player Battle</span>
                             </div>
-                            <div className="flex flex-col items-start relative z-10">
-                                <span className="leading-tight">VS AI</span>
-                                <span className="text-[10px] font-normal tracking-wider text-red-200/60 uppercase">Single Player Battle</span>
-                            </div>
-                            <Crosshair className="w-5 h-5 ml-auto opacity-40" />
                         </button>
 
-                        {/* ONLINE PVP Button */}
+                        {/* PVP Button */}
                         <button onClick={() => { pvp.connect(); setSelectPhase("lobby"); }}
-                            className="grudge-menu-btn-purple w-full flex items-center gap-4 py-4 px-6 rounded-xl font-black text-xl tracking-widest transition-all duration-200 hover:scale-[1.03] active:scale-[0.98] cursor-pointer"
+                            className="group w-full relative overflow-hidden rounded-xl transition-all duration-200 hover:scale-[1.03] active:scale-[0.98] cursor-pointer"
                             style={{
-                                background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 40%, #4c1d95 100%)',
-                                border: '1px solid rgba(160,100,255,0.3)',
+                                background: 'linear-gradient(135deg, #0a0a1a 0%, #10102a 40%, #0a0a0a 100%)',
+                                border: '2px solid rgba(185,28,28,0.3)',
+                                boxShadow: '0 0 20px rgba(185,28,28,0.1), inset 0 0 30px rgba(0,0,0,0.5)',
                             }}>
-                            <div className="relative w-12 h-12 flex-shrink-0">
-                                <img src={demoP2.sprites.idle.src} alt="" className="w-full h-full object-contain" style={{ imageRendering: 'pixelated', transform: 'scaleX(-1)' }} />
-                                <div className="absolute inset-0 rounded-full" style={{ boxShadow: '0 0 12px rgba(109,40,217,0.6)' }} />
+                            <div className="absolute inset-0 bg-gradient-to-r from-red-900/10 via-transparent to-red-900/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            <img src="/fighter2d/image/menu/pvp-btn.png" alt="PVP - Challenge Real Players"
+                                className="w-full h-20 object-contain py-2 relative z-10"
+                                style={{ imageRendering: 'pixelated' }} />
+                            <div className="absolute bottom-1 left-0 right-0 text-center">
+                                <span className="text-[9px] font-medium tracking-[0.3em] text-red-300/40 uppercase">Challenge Real Players</span>
                             </div>
-                            <div className="flex flex-col items-start relative z-10">
-                                <span className="leading-tight">ONLINE PVP</span>
-                                <span className="text-[10px] font-normal tracking-wider text-purple-200/60 uppercase">Challenge Real Players</span>
-                            </div>
-                            <Globe className="w-5 h-5 ml-auto opacity-40" />
                         </button>
                     </div>
 
@@ -3299,20 +3311,6 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     }
 
     // ─── STAGE SELECT SCREEN ─────────────────────────────────────
-    // Load custom maps when entering stage select
-    useEffect(() => {
-        if (selectPhase !== "stage") return;
-        (async () => {
-            const maps = await listMaps();
-            const loaded: StageDefinition[] = [];
-            for (const m of maps) {
-                const data = await loadMap(m.id);
-                if (data) loaded.push(mapToStage(data) as unknown as StageDefinition);
-            }
-            setCustomStages(loaded);
-        })();
-    }, [selectPhase]);
-
     if (selectPhase === "stage") {
         const allStages = [...STAGES, ...customStages];
         return (
