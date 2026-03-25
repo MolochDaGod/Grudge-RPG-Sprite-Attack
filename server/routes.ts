@@ -1273,7 +1273,12 @@ public class TethicalSprites : MonoBehaviour {
   });
 
   // ========== AI CHAT ROUTES ==========
-  registerChatRoutes(app);
+  // Chat requires DATABASE_URL — skip if not configured (PvP-only mode)
+  if (process.env.DATABASE_URL) {
+    registerChatRoutes(app);
+  } else {
+    console.log("[routes] DATABASE_URL not set — chat routes disabled (PvP-only mode)");
+  }
 
   return httpServer;
 }
