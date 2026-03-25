@@ -9,7 +9,8 @@ FROM node:20-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+# Build frontend (Vite → dist/public) then server (esbuild → dist/index.cjs)
+RUN npm run build && npm run build:server
 
 FROM node:20-alpine AS runtime
 WORKDIR /app
