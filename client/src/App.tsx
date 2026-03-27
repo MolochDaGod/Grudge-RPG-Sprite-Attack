@@ -44,27 +44,49 @@ function StartupIntro({ onComplete }: { onComplete: () => void }) {
   );
 }
 
+function getActiveRoute(): string {
+  // Support both path-based (/toonadmin) and hash-based (#toonadmin) routing
+  const path = window.location.pathname.replace(/^\//, "").toLowerCase();
+  const hash = window.location.hash.replace(/^#\/?/, "").toLowerCase();
+  return hash || path;
+}
+
 function GameApp() {
-  const [route, setRoute] = useState(window.location.hash);
-  const [showStartupIntro, setShowStartupIntro] = useState(true);
+  const [route, setRoute] = useState(getActiveRoute);
+  const [showStartupIntro, setShowStartupIntro] = useState(() => {
+    // Skip intro entirely when navigating directly to admin pages
+    const r = getActiveRoute();
+    return r !== "toonadmin" && r !== "mapadmin";
+  });
 
   useEffect(() => {
-    const onHash = () => setRoute(window.location.hash);
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
+    const update = () => setRoute(getActiveRoute());
+    window.addEventListener("hashchange", update);
+    window.addEventListener("popstate", update);
+    return () => {
+      window.removeEventListener("hashchange", update);
+      window.removeEventListener("popstate", update);
+    };
   }, []);
+
   if (showStartupIntro) {
     return <StartupIntro onComplete={() => setShowStartupIntro(false)} />;
   }
 
+  const goHome = () => {
+    window.history.pushState(null, "", "/");
+    window.location.hash = "";
+    setRoute("");
+  };
+
   // /toonadmin route
-  if (route === "#toonadmin" || route === "#/toonadmin") {
-    return <ToonAdmin onBack={() => { window.location.hash = ""; }} />;
+  if (route === "toonadmin") {
+    return <ToonAdmin onBack={goHome} />;
   }
 
   // /mapadmin route
-  if (route === "#mapadmin" || route === "#/mapadmin") {
-    return <MapAdmin onBack={() => { window.location.hash = ""; }} />;
+  if (route === "mapadmin") {
+    return <MapAdmin onBack={goHome} />;
   }
 
   return <GrudgeFighter2D onBack={() => window.location.reload()} />;
