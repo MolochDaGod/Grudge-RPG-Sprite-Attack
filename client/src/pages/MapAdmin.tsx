@@ -355,7 +355,7 @@ export default function MapAdmin({ onBack }: MapAdminProps) {
     requestDraw();
   };
 
-  const onCanvasMouseUp
+  const onCanvasMouseUp = () => {
     isPanning.current = false;
     dragPlacement.current = null;
   };
