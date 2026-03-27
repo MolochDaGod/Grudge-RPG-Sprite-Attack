@@ -53,7 +53,7 @@ export function getDefaultSpriteIdForClass(classId: string): string | null {
   const classToSpriteMap: Record<string, string> = {
     warrior: "knight",
     mage: "wizard",
-    ranger: "archer",
+    ranger: "soldier",
     worge_caster: "priest",
     worge_bear: "werewolf",
   };

@@ -63,7 +63,7 @@ export const CHARACTER_SPRITES: Record<string, SpriteDefinition> = {
   ranger: {
     id: 'ranger',
     name: 'Ranger',
-    path: '/fighter2d/characters/Archer/Archer-Idle.png',
+    path: '/sprites/characters/Soldier/Soldier/Soldier-Idle.png',
     frameWidth: 100,
     frameHeight: 100,
     animations: Object.values(ANIMATION_STATES),

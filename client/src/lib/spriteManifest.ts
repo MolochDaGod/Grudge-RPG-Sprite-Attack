@@ -32,24 +32,6 @@ function projectile(name: string, fileName: string, frames: number = 4, width: n
 
 export const SPRITE_CHARACTERS: CharacterSprite[] = [
   {
-    id: 'archer',
-    name: 'Archer',
-    folder: 'Archer/Archer',
-    effectsFolder: 'Archer/Archer(Split Effects)',
-    projectileFolder: 'Archer/Arrow(projectile)',
-    animations: {
-      'idle': anim('Idle', 'Archer-Idle', 6, true),
-      'walk': anim('Walk', 'Archer-Walk', 8, true),
-      'attack01': anim('Attack 1', 'Archer-Attack01', 9),
-      'attack02': anim('Attack 2', 'Archer-Attack02', 12),
-      'death': anim('Death', 'Archer-Death', 4),
-      'hurt': anim('Hurt', 'Archer-Hurt', 4),
-      'attack01_effect': effect('Attack 1 Effect', 'Archer-Attack01_Effect', 9),
-      'attack02_effect': effect('Attack 2 Effect', 'Archer-Attack02_Effect', 12),
-      'arrow': projectile('Arrow', 'Arrow02(100x100)', 1),
-    }
-  },
-  {
     id: 'armored-axeman',
     name: 'Armored Axeman',
     folder: 'Armored Axeman/Armored Axeman',
@@ -261,22 +243,6 @@ export const SPRITE_CHARACTERS: CharacterSprite[] = [
       'hurt': anim('Hurt', 'Skeleton-Hurt', 4),
       'attack01_effect': effect('Attack 1 Effect', 'Skeleton-Attack01_Effect', 7),
       'attack02_effect': effect('Attack 2 Effect', 'Skeleton-Attack02_Effect', 8),
-    }
-  },
-  {
-    id: 'skeleton-archer',
-    name: 'Skeleton Archer',
-    folder: 'Skeleton Archer/Skeleton Archer',
-    effectsFolder: 'Skeleton Archer/Skeleton Archer(Split Effects)',
-    projectileFolder: 'Skeleton Archer/Arrow(projectile)',
-    animations: {
-      'idle': anim('Idle', 'Skeleton Archer-Idle', 6, true),
-      'walk': anim('Walk', 'Skeleton Archer-Walk', 8, true),
-      'attack': anim('Attack', 'Skeleton Archer-Attack', 9),
-      'death': anim('Death', 'Skeleton Archer-Death', 4),
-      'hurt': anim('Hurt', 'Skeleton Archer-Hurt', 4),
-      'attack_effect': effect('Attack Effect', 'Skeleton Archer-Attack_Effect', 9),
-      'arrow': projectile('Arrow', 'Arrow03(100x100)', 1),
     }
   },
   {
