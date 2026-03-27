@@ -242,44 +242,45 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
     if (!pos) return;
     const dx = pos.x - drag.startX;
     const dy = pos.y - drag.startY;
-    const { startRect, element, edge } = drag;
+    const { element, edge } = drag;
 
-    // Compute the actual game-space collision size for ratio calculations
-    const { scaleX: scX } = computeRenderScale(char);
+    // pxRatio: canvas pixels per game pixel (same formula as render loop)
+    const img = imgRef.current;
+    const { scaleX: scX, scaleY: scY } = computeRenderScale(char);
+    const fh = img ? img.height : char.frameSize;
+    const pxRatio = (fh * scale) / (300 * scY);
+    // Convert canvas-pixel drag delta to game-pixel delta
+    const gameDx = dx / pxRatio;
+    const gameDy = dy / pxRatio;
+
     const baseColW = Math.round(80 * Math.max(0.6, Math.min(scX, 2.0)));
-    const { scaleY: scY } = computeRenderScale(char);
     const baseColH = Math.round(160 * Math.max(0.6, Math.min(scY, 2.0)));
 
     if (element === "body") {
-      // Dragging body = resize overall collider width/height
       const curOv = overrides[selectedId]?.collider ?? {};
       const curWM = curOv.widthMult ?? 1.0;
       const curHM = curOv.heightMult ?? 1.0;
       let newWM = curWM, newHM = curHM;
       if (edge === "left" || edge === "right") {
-        const pixelDelta = edge === "right" ? dx : -dx;
-        newWM = Math.max(0.3, curWM + (pixelDelta / baseColW) * 2);
+        // Each side moves by gameDx, so full width changes by 2*gameDx
+        const sign = edge === "right" ? 1 : -1;
+        newWM = Math.max(0.3, curWM + (sign * gameDx * 2) / baseColW);
       } else if (edge === "top" || edge === "bottom") {
-        const pixelDelta = edge === "bottom" ? dy : -dy;
-        newHM = Math.max(0.3, curHM + (pixelDelta / baseColH) * 2);
+        const sign = edge === "bottom" ? 1 : -1;
+        newHM = Math.max(0.3, curHM + (sign * gameDy * 2) / baseColH);
       } else {
-        // move = adjust both
-        newWM = Math.max(0.3, curWM + (dx / baseColW) * 0.5);
-        newHM = Math.max(0.3, curHM + (-dy / baseColH) * 0.5);
+        // Center drag: scale both proportionally
+        newWM = Math.max(0.3, curWM + (gameDx * 2) / baseColW);
+        newHM = Math.max(0.3, curHM + (-gameDy * 2) / baseColH);
       }
       const newOv = { ...overrides };
       if (!newOv[selectedId]) newOv[selectedId] = { actions: {} };
       newOv[selectedId].collider = { ...newOv[selectedId].collider, widthMult: Math.round(newWM * 100) / 100, heightMult: Math.round(newHM * 100) / 100 };
       setOverrides(newOv);
     } else if (element === "weapon") {
-      // Dragging weapon = resize reach
+      // Weapon reach is in game pixels — convert canvas dx to game px
       const curReach = overrides[selectedId]?.collider?.weaponReach ?? scX * 80;
-      let newReach = curReach;
-      if (edge === "right" || edge === "left") {
-        newReach = Math.max(10, curReach + dx);
-      } else if (edge === "move") {
-        newReach = Math.max(10, curReach + dx);
-      }
+      const newReach = Math.max(10, curReach + gameDx);
       const newOv = { ...overrides };
       if (!newOv[selectedId]) newOv[selectedId] = { actions: {} };
       newOv[selectedId].collider = { ...newOv[selectedId].collider, weaponReach: Math.round(newReach) };
@@ -288,7 +289,7 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
     // Update start position for next delta
     drag.startX = pos.x;
     drag.startY = pos.y;
-  }, [getCanvasPos, hitTestCanvas, detectEdge, char, overrides, selectedId]);
+  }, [getCanvasPos, hitTestCanvas, detectEdge, char, overrides, selectedId, scale]);
 
   const handleCanvasMouseUp = useCallback(() => {
     if (dragRef.current) {
@@ -566,7 +567,7 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
         }
       }
 
-      // Selection highlight (drawn on top of everything)
+      // Selection highlight + drag handles (drawn on top of everything)
       const sel = selectedElementRef.current;
       if (sel) {
         const region = hitRegionsRef.current.find(r => r.id === sel);
@@ -577,12 +578,26 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
           ctx.globalAlpha = 0.9;
           ctx.setLineDash([5, 3]);
           ctx.strokeRect(region.x - 1, region.y - 1, region.w + 2, region.h + 2);
+          ctx.setLineDash([]);
           // Label
           ctx.fillStyle = "#fbbf24";
           ctx.globalAlpha = 0.7;
           ctx.font = "bold 9px monospace";
-          ctx.setLineDash([]);
           ctx.fillText(sel.toUpperCase(), region.x, region.y - 4);
+          // Drag handles on edges (small squares) for body/weapon
+          if (["body", "weapon"].includes(sel)) {
+            ctx.fillStyle = "#fbbf24";
+            ctx.globalAlpha = 0.9;
+            const HS = 4; // handle half-size
+            // Left
+            ctx.fillRect(region.x - HS, region.y + region.h / 2 - HS, HS * 2, HS * 2);
+            // Right
+            ctx.fillRect(region.x + region.w - HS, region.y + region.h / 2 - HS, HS * 2, HS * 2);
+            // Top
+            ctx.fillRect(region.x + region.w / 2 - HS, region.y - HS, HS * 2, HS * 2);
+            // Bottom
+            ctx.fillRect(region.x + region.w / 2 - HS, region.y + region.h - HS, HS * 2, HS * 2);
+          }
           ctx.restore();
         }
       }
@@ -602,7 +617,7 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
     };
     raf = requestAnimationFrame(render);
     return () => cancelAnimationFrame(raf);
-  }, [previewSrc, previewFrameCount, scale, playing, speed, showCollision, showOnion, showVfx, facingRight, char, charOv, previewAnimKey]);
+  }, [previewSrc, previewFrameCount, scale, playing, speed, showCollision, showOnion, showVfx, facingRight, char, charOv, previewAnimKey, opponentId]);
 
   function isAttackAnim() {
     return previewAnimKey === "attack" || previewAnimKey === "attack2" || previewAnimKey === "special" || previewAnimKey === "cast";
