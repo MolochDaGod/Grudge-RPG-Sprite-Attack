@@ -34,6 +34,40 @@ export interface GrudaCharDef {
   superName: string;
 }
 
+/** Shared scale computation — used by GrudgeFighter2D and ToonAdmin */
+export function computeRenderScale(g: GrudaCharDef): { scaleX: number; scaleY: number } {
+    const isSmallSprite = g.frameSize <= 100;
+    const defaultScaleY = isSmallSprite ? 2 : 1;
+    const defaultScaleX = isSmallSprite ? 1.5 : 1;
+    const scaleY = g.renderScaleY ?? g.renderScale ?? defaultScaleY;
+    const scaleX = g.renderScaleX ?? (
+        g.renderScale !== undefined && isSmallSprite
+            ? g.renderScale * 0.75
+            : (g.renderScale ?? defaultScaleX)
+    );
+    return { scaleX, scaleY };
+}
+
+/** Clamp scale the same way as the fighter engine to get true collision dimensions */
+export function computeCollisionSize(g: GrudaCharDef): { width: number; height: number } {
+    const { scaleX, scaleY } = computeRenderScale(g);
+    return {
+        width: Math.round(80 * Math.max(0.6, Math.min(scaleX, 2.0))),
+        height: Math.round(160 * Math.max(0.6, Math.min(scaleY, 2.0))),
+    };
+}
+
+/** Typed accessor for character animation data by slot key */
+export function getCharAnimData(char: GrudaCharDef, slot: string): [string, number] | undefined {
+    const map: Record<string, [string, number] | undefined> = {
+        idle: char.idle, walk: char.walk, attack: char.attack,
+        attack2: char.attack2, hurt: char.hurt, death: char.death,
+        jump: char.jump, fall: char.fall, block: char.block,
+        cast: char.cast, special: char.special, roll: char.roll,
+    };
+    return map[slot];
+}
+
 export const GRUDA_ROSTER: GrudaCharDef[] = [
   // ─── ORIGINAL 7 (100x100 frames) ──────────────────────────────
   { id:"knight", name:"Knight", folder:"Knight", color:"#e74c3c", faction:"crusade", frameSize:100, renderScale:2, renderScaleX:1.6, renderScaleY:2.45,

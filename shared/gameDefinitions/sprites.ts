@@ -47,7 +47,7 @@ export const CHARACTER_SPRITES: Record<string, SpriteDefinition> = {
   warrior: {
     id: 'warrior',
     name: 'Warrior',
-    path: '/attached_assets/GrudgeRPGAssets2d/Knight/Knight/Knight-Idle.png',
+    path: '/fighter2d/characters/Knight/Knight-Idle.png',
     frameWidth: 100,
     frameHeight: 100,
     animations: Object.values(ANIMATION_STATES),
@@ -55,7 +55,7 @@ export const CHARACTER_SPRITES: Record<string, SpriteDefinition> = {
   mage: {
     id: 'mage',
     name: 'Mage',
-    path: '/attached_assets/GrudgeRPGAssets2d/Wizard/Wizard/Wizard-Idle.png',
+    path: '/fighter2d/characters/Wizard/Wizard-Idle.png',
     frameWidth: 100,
     frameHeight: 100,
     animations: Object.values(ANIMATION_STATES),
@@ -63,7 +63,7 @@ export const CHARACTER_SPRITES: Record<string, SpriteDefinition> = {
   ranger: {
     id: 'ranger',
     name: 'Ranger',
-    path: '/attached_assets/GrudgeRPGAssets2d/Archer/Archer/Archer-Idle.png',
+    path: '/fighter2d/characters/Archer/Archer-Idle.png',
     frameWidth: 100,
     frameHeight: 100,
     animations: Object.values(ANIMATION_STATES),
@@ -71,7 +71,7 @@ export const CHARACTER_SPRITES: Record<string, SpriteDefinition> = {
   worge_caster: {
     id: 'worge_caster',
     name: 'Worge (Caster)',
-    path: '/attached_assets/GrudgeRPGAssets2d/Priest/Priest/Priest-Idle.png',
+    path: '/fighter2d/characters/Priest/Priest-Idle.png',
     frameWidth: 100,
     frameHeight: 100,
     animations: Object.values(ANIMATION_STATES),
@@ -79,7 +79,7 @@ export const CHARACTER_SPRITES: Record<string, SpriteDefinition> = {
   worge_bear: {
     id: 'worge_bear',
     name: 'Worge (Bear)',
-    path: '/attached_assets/GrudgeRPGAssets2d/Werewolf/Werewolf/Werewolf-Idle.png',
+    path: '/fighter2d/characters/werewolf/idle.png',
     frameWidth: 100,
     frameHeight: 100,
     animations: Object.values(ANIMATION_STATES),
@@ -141,11 +141,13 @@ export function getRaceSprite(raceId: string): SpriteDefinition | undefined {
   return RACE_SPRITES[raceId];
 }
 
+// NOTE: Monster sprites use the same fighter2d character system.
+// Add actual monster sprite sheets to /fighter2d/characters/ as they become available.
 export const MONSTER_SPRITES: Record<string, SpriteDefinition> = {
   goblin: {
     id: 'goblin',
     name: 'Goblin',
-    path: '/2dassets/monsters/goblin.png',
+    path: '/sprites/characters/Slime/Slime-Idle.png',
     frameWidth: 48,
     frameHeight: 48,
     animations: Object.values(ANIMATION_STATES),
@@ -153,25 +155,25 @@ export const MONSTER_SPRITES: Record<string, SpriteDefinition> = {
   skeleton: {
     id: 'skeleton',
     name: 'Skeleton',
-    path: '/2dassets/monsters/skeleton.png',
-    frameWidth: 48,
-    frameHeight: 48,
+    path: '/fighter2d/characters/Armored-Skeleton/Armored Skeleton-Idle.png',
+    frameWidth: 100,
+    frameHeight: 100,
     animations: Object.values(ANIMATION_STATES),
   },
   orc: {
     id: 'orc',
     name: 'Orc',
-    path: '/2dassets/monsters/orc.png',
-    frameWidth: 64,
-    frameHeight: 64,
+    path: '/fighter2d/characters/Orc/Orc-Idle.png',
+    frameWidth: 100,
+    frameHeight: 100,
     animations: Object.values(ANIMATION_STATES),
   },
   dragon: {
     id: 'dragon',
     name: 'Dragon',
-    path: '/2dassets/monsters/dragon.png',
-    frameWidth: 128,
-    frameHeight: 128,
+    path: '/fighter2d/characters/werebear/idle.png',
+    frameWidth: 100,
+    frameHeight: 100,
     animations: Object.values(ANIMATION_STATES),
   },
 };

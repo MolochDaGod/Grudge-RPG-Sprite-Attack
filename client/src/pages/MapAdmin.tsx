@@ -72,6 +72,8 @@ export default function MapAdmin({ onBack }: MapAdminProps) {
   const mouseWorld = useRef({ x: 0, y: 0 });
   const ghostPos = useRef<{ x: number; y: number } | null>(null);
   const loadedImages = useRef<Map<string, HTMLImageElement>>(new Map());
+  const drawDirty = useRef(false);
+  const drawRafRef = useRef<number | null>(null);
 
   // Preload all unique asset images used in current map + the selected asset
   useEffect(() => {
@@ -87,7 +89,7 @@ export default function MapAdmin({ onBack }: MapAdminProps) {
     Promise.all([...srcs].map(async s => {
       const img = await loadImg(s);
       loadedImages.current.set(s, img);
-    })).then(() => drawCanvas());
+    })).then(() => requestDraw());
   }, [mapData.assets, selectedAsset, selectedCategory]);
 
   // Refresh saved maps list
@@ -112,6 +114,17 @@ export default function MapAdmin({ onBack }: MapAdminProps) {
   }, [zoom, panX, panY]);
 
   const snapToGrid = (v: number) => Math.round(v / GRID_SIZE) * GRID_SIZE;
+
+  // rAF-gated redraw: batches multiple draw requests into one per frame
+  const requestDraw = useCallback(() => {
+    if (drawDirty.current) return;
+    drawDirty.current = true;
+    if (drawRafRef.current !== null) cancelAnimationFrame(drawRafRef.current);
+    drawRafRef.current = requestAnimationFrame(() => {
+      drawDirty.current = false;
+      drawCanvas();
+    });
+  }, []);
 
   // ─── Canvas draw ────────────────────────────────────────────────
   const drawCanvas = useCallback(() => {
@@ -339,10 +352,10 @@ export default function MapAdmin({ onBack }: MapAdminProps) {
       }));
     }
 
-    drawCanvas();
+    requestDraw();
   };
 
-  const onCanvasMouseUp = () => {
+  const onCanvasMouseUp
     isPanning.current = false;
     dragPlacement.current = null;
   };
@@ -408,7 +421,7 @@ export default function MapAdmin({ onBack }: MapAdminProps) {
     };
     setMapData(prev => ({ ...prev, assets: [...prev.assets, pa] }));
     // Also preload image
-    loadImg(def.src).then(img => { loadedImages.current.set(def.src, img); drawCanvas(); });
+    loadImg(def.src).then(img => { loadedImages.current.set(def.src, img); requestDraw(); });
   };
 
   const onCanvasDragOver = (e: React.DragEvent) => { e.preventDefault(); };
@@ -724,16 +737,39 @@ export default function MapAdmin({ onBack }: MapAdminProps) {
             </label>
             <label className="block">
               <span className="text-white/50">Floor X</span>
-              <input type="number" value={mapData.mainFloorX} onChange={e => setMapData(d => ({ ...d, mainFloorX: Number(e.target.value) }))} className="block w-full bg-slate-800 border border-white/20 rounded px-2 py-1 mt-0.5" />
+              <input type="number" value={mapData.mainFloorX} onChange={e => setMapData(d => ({ ...d, mainFloorX: Math.max(0, Number(e.target.value)) }))} className="block w-full bg-slate-800 border border-white/20 rounded px-2 py-1 mt-0.5" />
             </label>
             <label className="block">
               <span className="text-white/50">Floor Y</span>
-              <input type="number" value={mapData.mainFloorY} onChange={e => setMapData(d => ({ ...d, mainFloorY: Number(e.target.value) }))} className="block w-full bg-slate-800 border border-white/20 rounded px-2 py-1 mt-0.5" />
+              <input type="number" value={mapData.mainFloorY} onChange={e => setMapData(d => ({ ...d, mainFloorY: Math.max(0, Math.min(CANVAS_H, Number(e.target.value))) }))} className="block w-full bg-slate-800 border border-white/20 rounded px-2 py-1 mt-0.5" />
             </label>
             <label className="block">
               <span className="text-white/50">Floor Width</span>
-              <input type="number" value={mapData.mainFloorW} onChange={e => setMapData(d => ({ ...d, mainFloorW: Number(e.target.value) }))} className="block w-full bg-slate-800 border border-white/20 rounded px-2 py-1 mt-0.5" />
+              <input type="number" value={mapData.mainFloorW} onChange={e => setMapData(d => ({ ...d, mainFloorW: Math.max(32, Number(e.target.value)) }))} className="block w-full bg-slate-800 border border-white/20 rounded px-2 py-1 mt-0.5" />
             </label>
+          </div>
+
+          {/* Blast Zone */}
+          <div>
+            <h3 className="text-sm font-bold text-red-400 mb-1">Blast Zone</h3>
+            <div className="grid grid-cols-2 gap-1 text-xs">
+              <label>
+                <span className="text-white/40">Top</span>
+                <input type="number" value={mapData.blastZone.top} onChange={e => setMapData(d => ({ ...d, blastZone: { ...d.blastZone, top: Number(e.target.value) } }))} className="block w-full bg-slate-800 border border-white/20 rounded px-1 py-0.5" />
+              </label>
+              <label>
+                <span className="text-white/40">Bottom</span>
+                <input type="number" value={mapData.blastZone.bottom} onChange={e => setMapData(d => ({ ...d, blastZone: { ...d.blastZone, bottom: Math.max(d.blastZone.top + 100, Number(e.target.value)) } }))} className="block w-full bg-slate-800 border border-white/20 rounded px-1 py-0.5" />
+              </label>
+              <label>
+                <span className="text-white/40">Left</span>
+                <input type="number" value={mapData.blastZone.left} onChange={e => setMapData(d => ({ ...d, blastZone: { ...d.blastZone, left: Number(e.target.value) } }))} className="block w-full bg-slate-800 border border-white/20 rounded px-1 py-0.5" />
+              </label>
+              <label>
+                <span className="text-white/40">Right</span>
+                <input type="number" value={mapData.blastZone.right} onChange={e => setMapData(d => ({ ...d, blastZone: { ...d.blastZone, right: Math.max(d.blastZone.left + 100, Number(e.target.value)) } }))} className="block w-full bg-slate-800 border border-white/20 rounded px-1 py-0.5" />
+              </label>
+            </div>
           </div>
 
           {/* Platforms list */}

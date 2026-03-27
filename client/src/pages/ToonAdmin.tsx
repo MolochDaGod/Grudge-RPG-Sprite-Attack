@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GRUDA_ROSTER, type GrudaCharDef } from "@/lib/grudaRoster";
+import { GRUDA_ROSTER, type GrudaCharDef, computeCollisionSize, computeRenderScale, getCharAnimData } from "@/lib/grudaRoster";
 import { ACTION_SLOTS, type ActionSlotKey, type CharOverrides, loadOverrides, setCharOverrides, deleteCharOverrides, exportAllOverrides, importOverrides, saveOverridesToServer } from "@/lib/charConfig";
 import { getAllVfx, getVfxCategories, searchVfx, preloadVfx, getVfxById, getVfxImage, drawVfxFrame, type VfxDef } from "@/lib/vfxLibrary";
 import { getFaction, FACTION_IDS } from "@/lib/factions";
@@ -73,13 +73,15 @@ function getBottomPadding(img: HTMLImageElement): number {
 const autoHold = (f: number) => f > 20 ? 2 : f > 10 ? 3 : f > 6 ? 4 : 5;
 
 // ─── Canvas Stage Constants ──────────────────────────────────────
+// Proportions match actual game arenas (floor at ~70% of height)
 const STAGE_W = 800;
 const STAGE_H = 500;
 const GRID_SIZE = 40;
-const FLOOR_Y = 380;
-const PLATFORM_Y = 260;
+const FLOOR_Y = Math.round(STAGE_H * 0.76); // ~380, matches game floor-to-arena ratio
+const PLATFORM_Y = Math.round(STAGE_H * 0.52); // ~260
 const PLATFORM_W = 200;
 const PLATFORM_X = 300;
+const DEFAULT_HIT_FRAME = 4; // same as attackHitFrame in GrudgeFighter2D
 
 // ─── Main Component ─────────────────────────────────────────────
 export default function ToonAdmin({ onBack }: { onBack: () => void }) {
@@ -99,6 +101,7 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
   const [toast, setToast] = useState("");
   const [serverStatus, setServerStatus] = useState<"saved" | "saving" | "offline" | "">(""); 
   const [vfxLoaded, setVfxLoaded] = useState(false);
+  const [facingRight, setFacingRight] = useState(true);
 
   // ─── Editor interaction state ──────────────────────────────────
   const [selectedElement, setSelectedElement] = useState<CanvasElement>(null);
@@ -174,11 +177,11 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
     });
   }, []);
 
-  // Current animation source
+  // Current animation source (uses typed accessor instead of unsafe cast)
   const getSlotAnim = (slot: ActionSlotKey) => {
     const ov = charOv.actions[slot];
     if (ov) return ov;
-    const def = (char as any)[slot] as [string, number] | undefined;
+    const def = getCharAnimData(char, slot);
     if (!def) return null;
     return { file: def[0], frames: def[1], hold: autoHold(def[1]), loop: slot === "idle" || slot === "walk" };
   };
@@ -270,13 +273,11 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
         ctx.drawImage(img, frameRef.current * fw, 0, fw, fh, drawX, drawY, dw, dh);
         hitRegionsRef.current.push({ id: "sprite", x: drawX, y: drawY, w: dw, h: dh });
 
-        // Collision overlay
+        // Collision overlay — uses shared computeCollisionSize for exact match with game
         if (showCollision) {
-          const isSmall = char.frameSize <= 100;
-          const scY = char.renderScaleY ?? char.renderScale ?? (isSmall ? 2 : 1);
-          const scX = char.renderScaleX ?? (char.renderScale !== undefined && isSmall ? (char.renderScale ?? 1) * 0.75 : (char.renderScale ?? (isSmall ? 1.5 : 1)));
-          const colW = Math.round(80 * Math.max(0.6, Math.min(scX, 2.0)));
-          const colH = Math.round(160 * Math.max(0.6, Math.min(scY, 2.0)));
+          const { width: colW, height: colH } = computeCollisionSize(char);
+          const { scaleX: scX } = computeRenderScale(char);
+          const facing = facingRight ? 1 : -1;
           hitRegionsRef.current.push({ id: "head", x: cx - colW * 0.3, y: cy - colH, w: colW * 0.6, h: colH * 0.25 });
           hitRegionsRef.current.push({ id: "body", x: cx - colW * 0.4, y: cy - colH * 0.75, w: colW * 0.8, h: colH * 0.4 });
           hitRegionsRef.current.push({ id: "legs", x: cx - colW * 0.35, y: cy - colH * 0.35, w: colW * 0.7, h: colH * 0.35 });
@@ -325,22 +326,25 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
           ctx.strokeRect(cx - colW * 0.35, cy - colH * 0.35, colW * 0.7, colH * 0.35);
           ctx.restore();
 
-          // Weapon hitbox (attack frames only)
+          // Weapon hitbox — respects facing direction, only shows on active hit frame
           const isAttack = previewAnimKey === "attack" || previewAnimKey === "attack2" || previewAnimKey === "special";
           if (isAttack) {
             const atkReach = scX * 80;
-            hitRegionsRef.current.push({ id: "weapon", x: cx + 30, y: cy - colH * 0.78, w: atkReach, h: colH * 0.5 });
+            const isActiveHitFrame = frameRef.current >= DEFAULT_HIT_FRAME;
+            const weaponX = facing > 0 ? cx + 30 : cx - 30 - atkReach;
+            const weaponAlpha = isActiveHitFrame ? 0.7 : 0.2;
+            hitRegionsRef.current.push({ id: "weapon", x: weaponX, y: cy - colH * 0.78, w: atkReach, h: colH * 0.5 });
             ctx.save();
-            ctx.strokeStyle = "#f472b6";
+            ctx.strokeStyle = isActiveHitFrame ? "#f472b6" : "#f472b650";
             ctx.lineWidth = 2;
-            ctx.globalAlpha = 0.6;
-            ctx.strokeRect(cx + 30, cy - colH * 0.78, atkReach, colH * 0.5);
+            ctx.globalAlpha = weaponAlpha;
+            ctx.strokeRect(weaponX, cy - colH * 0.78, atkReach, colH * 0.5);
             ctx.fillStyle = "#f472b6";
-            ctx.globalAlpha = 0.08;
-            ctx.fillRect(cx + 30, cy - colH * 0.78, atkReach, colH * 0.5);
-            ctx.globalAlpha = 0.6;
+            ctx.globalAlpha = isActiveHitFrame ? 0.12 : 0.03;
+            ctx.fillRect(weaponX, cy - colH * 0.78, atkReach, colH * 0.5);
+            ctx.globalAlpha = weaponAlpha;
             ctx.font = "bold 9px monospace";
-            ctx.fillText("WEAPON", cx + 32, cy - colH * 0.78 + 10);
+            ctx.fillText(isActiveHitFrame ? "WEAPON (HIT)" : "WEAPON", weaponX + 2, cy - colH * 0.78 + 10);
             ctx.restore();
           }
 
@@ -356,8 +360,8 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
           ctx.fillText("body", eCx - eRx + 2, eCy - eRy + 10);
         }
 
-        // VFX preview
-        if (showVfx && isAttackAnim()) {
+        // VFX preview — shown for any slot with assigned VFX (not just attack anims)
+        if (showVfx && previewAnimKey) {
           const slot = previewAnimKey as ActionSlotKey;
           const slotOv = charOv.actions[slot];
           const hitVfxId = slotOv?.hitVfx;
@@ -366,14 +370,14 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
             const vfx = getVfxById(hitVfxId);
             if (vfx) {
               const vfxFrame = Math.floor(frameRef.current * 0.7) % vfx.frames;
-              drawVfxFrame(ctx, vfx, vfxFrame, cx + 60, cy - 80, 2.5, false);
+              drawVfxFrame(ctx, vfx, vfxFrame, cx + 60, cy - 80, 2.5, !facingRight);
             }
           }
           if (swingVfxId) {
             const vfx = getVfxById(swingVfxId);
             if (vfx) {
               const vfxFrame = Math.floor(frameRef.current * 0.8) % vfx.frames;
-              drawVfxFrame(ctx, vfx, vfxFrame, cx + 40, cy - 60, 2, false);
+              drawVfxFrame(ctx, vfx, vfxFrame, cx + 40, cy - 60, 2, !facingRight);
             }
           }
         }
@@ -415,7 +419,7 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
     };
     raf = requestAnimationFrame(render);
     return () => cancelAnimationFrame(raf);
-  }, [previewSrc, previewFrameCount, scale, playing, speed, showCollision, showOnion, showVfx, char, charOv, previewAnimKey]);
+  }, [previewSrc, previewFrameCount, scale, playing, speed, showCollision, showOnion, showVfx, facingRight, char, charOv, previewAnimKey]);
 
   function isAttackAnim() {
     return previewAnimKey === "attack" || previewAnimKey === "attack2" || previewAnimKey === "special" || previewAnimKey === "cast";
@@ -609,6 +613,10 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
               <input type="checkbox" checked={showVfx} onChange={e => setShowVfx(e.target.checked)} className="accent-sky-500" />
               VFX
             </label>
+            <button onClick={() => setFacingRight(f => !f)}
+              className={`px-2 py-0.5 rounded ${facingRight ? "bg-zinc-800 text-white/50" : "bg-purple-700 text-white"}`}>
+              {facingRight ? "Face →" : "Face ←"}
+            </button>
             <div className="ml-auto flex items-center gap-1">
               <span className="text-white/30">Scale</span>
               <input type="range" min={1} max={8} step={0.5} value={scale} onChange={e => setScale(parseFloat(e.target.value))} className="w-16 accent-red-500" />
@@ -635,12 +643,16 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
               {previewAnimKey && <span className="text-red-400 text-[9px] ml-auto">{previewAnimKey}</span>}
             </div>
             <div className="h-6 bg-zinc-800 rounded cursor-pointer relative" onClick={handleScrubberClick}>
-              {/* Frame markers */}
-              {Array.from({ length: totalFrames }, (_, i) => (
+              {/* Frame markers — hit frame highlighted for attack anims */}
+              {Array.from({ length: totalFrames }, (_, i) => {
+                const isHitFrame = (previewAnimKey === "attack" || previewAnimKey === "attack2" || previewAnimKey === "special") && i === DEFAULT_HIT_FRAME;
+                return (
                 <div key={i} className="absolute top-0 bottom-0" style={{ left: `${(i / totalFrames) * 100}%`, width: `${100 / totalFrames}%` }}>
-                  <div className={`h-full border-r border-white/10 ${i === frame ? "bg-red-500/30" : "hover:bg-white/5"}`} />
+                  <div className={`h-full border-r border-white/10 ${i === frame ? "bg-red-500/30" : isHitFrame ? "bg-pink-500/20" : "hover:bg-white/5"}`} />
+                  {isHitFrame && <div className="absolute top-0 left-0 w-full h-1 bg-pink-500/60" title="Hit frame" />}
                 </div>
-              ))}
+                );
+              })}
               {/* Playhead */}
               <div className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-10" style={{ left: `${(frame / Math.max(1, totalFrames)) * 100}%` }} />
             </div>

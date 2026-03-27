@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { ArrowLeft, Crosshair, Shield, Zap, Wifi } from "lucide-react";
 import { usePvP } from "@/hooks/usePvP";
-import { GRUDA_ROSTER, type GrudaCharDef } from "@/lib/grudaRoster";
+import { GRUDA_ROSTER, type GrudaCharDef, computeRenderScale } from "@/lib/grudaRoster";
 import { preloadVfx, getVfxById, getVfxImage, drawVfxFrame, type VfxDef } from "@/lib/vfxLibrary";
 import { getFaction, type FactionId } from "@/lib/factions";
 import { playSound, preloadSounds as preloadGameSounds } from "@/lib/gameSounds";
@@ -335,15 +335,7 @@ function grudaToCharDef(g: GrudaCharDef): CharacterDef {
     const base = `/fighter2d/characters/${g.folder}/`;
     // hold = frames per tick; higher frame count anims need faster hold to not drag
     const autoHold = (frames: number) => frames > 20 ? 2 : frames > 10 ? 3 : frames > 6 ? 4 : 5;
-    const isSmallSprite = g.frameSize <= 100;
-    const defaultScaleY = isSmallSprite ? 2 : 1;
-    const defaultScaleX = isSmallSprite ? 1.5 : 1;
-    const scaleY = g.renderScaleY ?? g.renderScale ?? defaultScaleY;
-    const scaleX = g.renderScaleX ?? (
-        g.renderScale !== undefined && isSmallSprite
-            ? g.renderScale * 0.75
-            : (g.renderScale ?? defaultScaleX)
-    );
+    const { scaleX, scaleY } = computeRenderScale(g);
     const s = (file: string, frames: number, loop: boolean) => ({
         src: base + file, frames, hold: autoHold(frames), loop,
     });
@@ -500,8 +492,8 @@ function respawnFighter(fighter: FighterRuntime, stage: StageDefinition): Fighte
 }
 
 function isOnPlatform(fighter: FighterRuntime, stage: StageDefinition, ignoreOneWayPlatforms = false): number | null {
-    // Wider tolerance prevents fast-falling characters from clipping through
-    const tolerance = Math.max(16, Math.abs(fighter.vy) * 1.5);
+    // Clamped tolerance: scales with velocity but capped to prevent phantom landings
+    const tolerance = Math.max(16, Math.min(Math.abs(fighter.vy) * 1.2, 28));
     // Check main floor
     if (fighter.vy >= 0 && fighter.y >= stage.mainFloorY - 4 && fighter.y <= stage.mainFloorY + tolerance
         && fighter.x >= stage.mainFloorX - 20 && fighter.x <= stage.mainFloorX + stage.mainFloorW + 20) {
@@ -518,12 +510,15 @@ function isOnPlatform(fighter: FighterRuntime, stage: StageDefinition, ignoreOne
     return null;
 }
 
-function getProjectileFloorY(projectile: { x: number; y: number }, stage: StageDefinition): number | null {
+function getProjectileFloorY(projectile: { x: number; y: number; vy?: number }, stage: StageDefinition): number | null {
+    // Velocity-aware tolerance so fast arcing projectiles don't pass through platforms
+    const vyAbs = Math.abs(projectile.vy ?? 0);
+    const tolerance = Math.max(18, Math.min(vyAbs * 1.2, 28));
     if (
         projectile.x >= stage.mainFloorX - 10 &&
         projectile.x <= stage.mainFloorX + stage.mainFloorW + 10 &&
         projectile.y >= stage.mainFloorY - 2 &&
-        projectile.y <= stage.mainFloorY + 18
+        projectile.y <= stage.mainFloorY + tolerance
     ) {
         return stage.mainFloorY;
     }
@@ -532,7 +527,7 @@ function getProjectileFloorY(projectile: { x: number; y: number }, stage: StageD
             projectile.x >= p.x - 8 &&
             projectile.x <= p.x + p.w + 8 &&
             projectile.y >= p.y - 2 &&
-            projectile.y <= p.y + 16
+            projectile.y <= p.y + tolerance
         ) {
             return p.y;
         }
@@ -902,6 +897,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const screenShakeRef = useRef({ intensity: 0, until: 0 });
     const hitFlashRef = useRef<{ target: FighterId; until: number } | null>(null);
     const debugBoxesRef = useRef(false);
+    const tileImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
 
     // When PvP fight starts, set both picks from server data
     useEffect(() => {
@@ -1680,7 +1676,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     const img = tileResults[i] as HTMLImageElement | null;
                     if (img) tileImgs.set(allSrcs[i], img);
                 }
-                (window as any).__stageTileImages = tileImgs;
+                tileImagesRef.current = tileImgs;
                 activeEffectsRef.current = [];
                 setIsReady(true);
             })
@@ -1948,7 +1944,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             ctx.translate(-cam.x, -cam.y);
 
             // ─── Draw custom map assets (bg + main layers) ─────────────
-            const tileImgs = (window as any).__stageTileImages as Map<string, HTMLImageElement> | undefined;
+            const tileImgs = tileImagesRef.current;
             if (stage.customAssets) {
                 for (const layer of ['bg', 'main'] as const) {
                     for (const ca of stage.customAssets.filter(a => a.layer === layer)) {
