@@ -38,11 +38,29 @@ export interface ActionOverride {
   loop: boolean;       // loop or play once
   hitVfx?: string;     // VFX ID to play on hit impact
   swingVfx?: string;   // VFX ID to play during attack swing
+  // Hit detection timing
+  hitFrame?: number;         // frame index when damage starts (default 4)
+  activeFrameEnd?: number;   // last active damage frame (default hitFrame + 2)
+  // Damage / knockback tuning per move
+  damageMult?: number;       // multiplier on base ATK for this move (default 1.0)
+  knockbackAngle?: KnockbackAngle; // launch direction override
   // Advanced maneuver options
   forwardMotion?: number;   // px to push character forward per play (combo QQQ momentum)
   freezeFrame?: number;     // frame index to freeze on (block-pose: hold mid-attack frame)
   reverseOnEnd?: boolean;   // play animation backwards after freeze (block release)
   comboWindow?: number;     // ms window to chain into next combo hit
+}
+
+export type KnockbackAngle = "neutral" | "up" | "down" | "spike" | "forward";
+
+// Per-character collision shape overrides
+export interface ColliderOverrides {
+  widthMult?: number;    // multiplier on base collision width (default 1.0)
+  heightMult?: number;   // multiplier on base collision height (default 1.0)
+  headScale?: number;    // scale factor for head hitzone (default 1.0)
+  bodyScale?: number;    // scale factor for body hitzone (default 1.0)
+  legsScale?: number;    // scale factor for legs hitzone (default 1.0)
+  weaponReach?: number;  // override weapon hitbox reach in px
 }
 
 // Full override config for a character
@@ -52,7 +70,10 @@ export interface CharOverrides {
     atk?: number;
     spd?: number;
     superDmg?: number;
+    hp?: number;
+    jumpForce?: number;
   };
+  collider?: ColliderOverrides;
   projectile?: string;
   effectSrc?: string;
   effectFrames?: number;

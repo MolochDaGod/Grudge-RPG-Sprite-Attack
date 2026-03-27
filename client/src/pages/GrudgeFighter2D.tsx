@@ -4,7 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { ArrowLeft, Crosshair, Shield, Zap, Wifi } from "lucide-react";
 import { usePvP } from "@/hooks/usePvP";
-import { GRUDA_ROSTER, type GrudaCharDef, computeRenderScale } from "@/lib/grudaRoster";
+import { GRUDA_ROSTER, type GrudaCharDef, computeRenderScale, applyOverrides, computeCollisionSizeWithOverrides } from "@/lib/grudaRoster";
+import { loadOverridesFromServer, type CharOverrides, type AllOverrides, type ActionOverride } from "@/lib/charConfig";
 import { preloadVfx, getVfxById, getVfxImage, drawVfxFrame, type VfxDef } from "@/lib/vfxLibrary";
 import { getFaction, type FactionId } from "@/lib/factions";
 import { playSound, preloadSounds as preloadGameSounds } from "@/lib/gameSounds";
@@ -313,6 +314,9 @@ interface CharacterDef {
     renderScaleX: number; // horizontal render multiplier
     renderScaleY: number; // vertical render multiplier
     hasRollAnimation: boolean;
+    // ToonAdmin override data carried through for runtime use
+    overrideActions?: Partial<Record<string, ActionOverride>>;
+    colliderOverrides?: CharOverrides["collider"];
 }
 
 // Active visual effects rendered on the canvas
@@ -330,31 +334,46 @@ interface ActiveEffect {
 }
 
 // Convert GRUDA roster data into CharacterDef for the fighter engine
-// frameSize is used to calculate correct frame widths (sprites aren't all 100x100)
-function grudaToCharDef(g: GrudaCharDef): CharacterDef {
+// Accepts optional ToonAdmin overrides to merge animation/stat/VFX changes
+function grudaToCharDef(baseChar: GrudaCharDef, ov?: CharOverrides): CharacterDef {
+    // Apply ToonAdmin overrides to the base character data first
+    const g = applyOverrides(baseChar, ov);
     const base = `/fighter2d/characters/${g.folder}/`;
     // hold = frames per tick; higher frame count anims need faster hold to not drag
     const autoHold = (frames: number) => frames > 20 ? 2 : frames > 10 ? 3 : frames > 6 ? 4 : 5;
     const { scaleX, scaleY } = computeRenderScale(g);
-    const s = (file: string, frames: number, loop: boolean) => ({
-        src: base + file, frames, hold: autoHold(frames), loop,
-    });
+
+    // Build sprite def, applying per-slot hold/loop overrides from ToonAdmin
+    const s = (file: string, frames: number, loop: boolean, slotKey?: string) => {
+        const slotOv = slotKey ? ov?.actions[slotKey as keyof typeof ov.actions] : undefined;
+        return {
+            src: base + file,
+            frames,
+            hold: slotOv?.hold ?? autoHold(frames),
+            loop: slotOv?.loop ?? loop,
+        };
+    };
+
+    // Stat overrides (jumpForce, hp are new additions from ToonAdmin)
+    const jumpForce = ov?.stats?.jumpForce ?? 16;
+    const hp = ov?.stats?.hp ?? 200;
+
     return {
         id: g.id,
         name: g.name,
         faction: g.faction,
         color: g.color,
         sprites: {
-            idle:    s(g.idle[0], g.idle[1], true),
-            run:     s(g.walk[0], g.walk[1], true),
-            jump:    s(g.jump?.[0] ?? g.idle[0], g.jump?.[1] ?? g.idle[1], false),
-            fall:    s(g.fall?.[0] ?? g.idle[0], g.fall?.[1] ?? g.idle[1], false),
-            dodge:   s(g.roll?.[0] ?? g.walk[0], g.roll?.[1] ?? g.walk[1], g.roll ? false : true),
-            attack:  s(g.attack[0], g.attack[1], false),
-            attack2: s(g.attack2?.[0] ?? g.attack[0], g.attack2?.[1] ?? g.attack[1], false),
-            special: s(g.special?.[0] ?? g.cast?.[0] ?? g.attack2?.[0] ?? g.attack[0], g.special?.[1] ?? g.cast?.[1] ?? g.attack2?.[1] ?? g.attack[1], false),
-            takeHit: s(g.hurt[0], g.hurt[1], false),
-            death:   s(g.death[0], g.death[1], false),
+            idle:    s(g.idle[0], g.idle[1], true, "idle"),
+            run:     s(g.walk[0], g.walk[1], true, "walk"),
+            jump:    s(g.jump?.[0] ?? g.idle[0], g.jump?.[1] ?? g.idle[1], false, "jump"),
+            fall:    s(g.fall?.[0] ?? g.idle[0], g.fall?.[1] ?? g.idle[1], false, "fall"),
+            dodge:   s(g.roll?.[0] ?? g.walk[0], g.roll?.[1] ?? g.walk[1], g.roll ? false : true, "roll"),
+            attack:  s(g.attack[0], g.attack[1], false, "attack"),
+            attack2: s(g.attack2?.[0] ?? g.attack[0], g.attack2?.[1] ?? g.attack[1], false, "attack2"),
+            special: s(g.special?.[0] ?? g.cast?.[0] ?? g.attack2?.[0] ?? g.attack[0], g.special?.[1] ?? g.cast?.[1] ?? g.attack2?.[1] ?? g.attack[1], false, "special"),
+            takeHit: s(g.hurt[0], g.hurt[1], false, "hurt"),
+            death:   s(g.death[0], g.death[1], false, "death"),
         },
         moveSet: {
             name: g.name,
@@ -364,7 +383,7 @@ function grudaToCharDef(g: GrudaCharDef): CharacterDef {
             downSpecialName: "Counter",
             superName: g.superName,
             runSpeed: g.spd,
-            jumpForce: 16,
+            jumpForce,
             baseDamage: g.atk,
             projectileDamage: Math.round(g.atk * 0.8),
             upSpecialDamage: Math.round(g.atk * 1.1),
@@ -379,10 +398,77 @@ function grudaToCharDef(g: GrudaCharDef): CharacterDef {
         renderScaleX: scaleX,
         renderScaleY: scaleY,
         hasRollAnimation: !!g.roll,
+        // Carry override data for runtime hit frame / VFX / damage lookups
+        overrideActions: ov?.actions,
+        colliderOverrides: ov?.collider,
     };
 }
 
-const CHARACTER_ROSTER: CharacterDef[] = GRUDA_ROSTER.map(grudaToCharDef);
+// Default roster (no overrides) — replaced at runtime when overrides load
+let CHARACTER_ROSTER: CharacterDef[] = GRUDA_ROSTER.map(g => grudaToCharDef(g));
+let _overridesLoaded = false;
+
+/** Load ToonAdmin overrides and rebuild CHARACTER_ROSTER */
+async function loadCharacterRoster(): Promise<CharacterDef[]> {
+    if (_overridesLoaded) return CHARACTER_ROSTER;
+    try {
+        const overrides = await loadOverridesFromServer();
+        CHARACTER_ROSTER = GRUDA_ROSTER.map(g => grudaToCharDef(g, overrides[g.id]));
+        _overridesLoaded = true;
+    } catch {
+        // Fallback: use base roster without overrides
+    }
+    return CHARACTER_ROSTER;
+}
+
+/** Get per-move hit frame from ToonAdmin override, or default 4 */
+function getHitFrame(charDef: CharacterDef | null, moveVariant: MoveVariant): number {
+    if (!charDef?.overrideActions) return 4;
+    // Map move variants to action slot keys
+    const slotMap: Partial<Record<MoveVariant, string>> = {
+        normal: "attack", altNormal: "attack2", dash: "dashAttack",
+        upSpecial: "special", downSpecial: "special", ranged: "special",
+    };
+    const slotKey = slotMap[moveVariant];
+    if (!slotKey) return 4;
+    return (charDef.overrideActions[slotKey] as ActionOverride | undefined)?.hitFrame ?? 4;
+}
+
+/** Get per-move damage multiplier from ToonAdmin override */
+function getMoveDamageMult(charDef: CharacterDef | null, moveVariant: MoveVariant): number {
+    if (!charDef?.overrideActions) return 1.0;
+    const slotMap: Partial<Record<MoveVariant, string>> = {
+        normal: "attack", altNormal: "attack2", dash: "dashAttack",
+        upSpecial: "special", downSpecial: "special", ranged: "special",
+    };
+    const slotKey = slotMap[moveVariant];
+    if (!slotKey) return 1.0;
+    return (charDef.overrideActions[slotKey] as ActionOverride | undefined)?.damageMult ?? 1.0;
+}
+
+/** Get character-specific VFX IDs from ToonAdmin overrides, falling back to pool */
+function getCharVfx(
+    charDef: CharacterDef | null,
+    moveVariant: MoveVariant,
+    fighterKey: string,
+    type: "swing" | "hit"
+): string {
+    if (charDef?.overrideActions) {
+        const slotMap: Partial<Record<MoveVariant, string>> = {
+            normal: "attack", altNormal: "attack2", dash: "dashAttack",
+            upSpecial: "special", downSpecial: "special", ranged: "special",
+        };
+        const slotKey = slotMap[moveVariant];
+        if (slotKey) {
+            const actionOv = charDef.overrideActions[slotKey] as ActionOverride | undefined;
+            const vfxId = type === "hit" ? actionOv?.hitVfx : actionOv?.swingVfx;
+            if (vfxId) return vfxId;
+        }
+    }
+    // Fall back to existing pool-based selection
+    const pool = type === "hit" ? HIT_VFX_BY_MOVE : SWING_VFX_BY_MOVE;
+    return pickMoveVfxId(moveVariant, fighterKey, pool);
+}
 
 function clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
@@ -429,19 +515,26 @@ function pickMoveVfxId(move: MoveVariant, fighterKey: string, pool: Record<MoveV
     return ids[hashString(`${fighterKey}:${move}`) % ids.length];
 }
 
-function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet, stage: StageDefinition, scaleX = 1, scaleY = 1): FighterRuntime {
+function createInitialFighter(id: FighterId, charDef: CharacterDef, stage: StageDefinition): FighterRuntime {
     const spawnX = id === "p1" ? stage.mainFloorX + 200 : stage.mainFloorX + stage.mainFloorW - 200;
+    const scaleX = charDef.renderScaleX;
+    const scaleY = charDef.renderScaleY;
+    // Apply collider overrides from ToonAdmin
+    const colOv = charDef.colliderOverrides;
+    const baseW = Math.round(80 * Math.max(0.6, Math.min(scaleX, 2.0)));
+    const baseH = Math.round(160 * Math.max(0.6, Math.min(scaleY, 2.0)));
+    const hp = charDef.moveSet.baseDamage > 0 ? 200 : 200; // future: ov?.stats?.hp
     return {
         id,
         x: spawnX,
         y: stage.mainFloorY,
         vx: 0,
         vy: 0,
-        width: Math.round(80 * Math.max(0.6, Math.min(scaleX, 2.0))),
-        height: Math.round(160 * Math.max(0.6, Math.min(scaleY, 2.0))),
+        width: Math.round(baseW * (colOv?.widthMult ?? 1.0)),
+        height: Math.round(baseH * (colOv?.heightMult ?? 1.0)),
         facing: id === "p1" ? 1 : -1,
-        hp: 200,
-        maxHp: 200,
+        hp,
+        maxHp: hp,
         stocks: STARTING_STOCKS,
         airJumpsLeft: MAX_AIR_JUMPS,
         invulnUntil: 0,
@@ -450,7 +543,7 @@ function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet, stage: S
         frameIndex: 0,
         frameTick: 0,
         stateLockUntil: 0,
-        attackHitFrame: 4,
+        attackHitFrame: getHitFrame(charDef, "normal"),
         attackHasConnected: false,
         counterUntil: 0,
         specialCooldownUntil: 0,
@@ -460,7 +553,7 @@ function createInitialFighter(id: FighterId, moveSet: CharacterMoveSet, stage: S
         dropThroughUntil: 0,
         moveVariant: "none",
         rescueUsed: false,
-        moveSet,
+        moveSet: charDef.moveSet,
     };
 }
 
@@ -985,8 +1078,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         if (!p1Pick || !p2Pick) return;
         const stage = stageRef.current;
         worldRef.current = {
-            p1: createInitialFighter("p1", p1Pick.moveSet, stage, p1Pick.renderScaleX, p1Pick.renderScaleY),
-            p2: createInitialFighter("p2", p2Pick.moveSet, stage, p2Pick.renderScaleX, p2Pick.renderScaleY),
+            p1: createInitialFighter("p1", p1Pick, stage),
+            p2: createInitialFighter("p2", p2Pick, stage),
             projectiles: [],
             winner: null,
             startedAt: performance.now(),
@@ -1073,8 +1166,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 id: `${fighterId}-${now}`,
                 owner: fighterId,
                 moveVariant: "ranged",
-                swingVfxId: pickMoveVfxId("ranged", fighterKey, SWING_VFX_BY_MOVE),
-                hitVfxId: pickMoveVfxId("ranged", fighterKey, HIT_VFX_BY_MOVE),
+                swingVfxId: getCharVfx(charDef ?? null, "ranged", fighterKey, "swing"),
+                hitVfxId: getCharVfx(charDef ?? null, "ranged", fighterKey, "hit"),
                 isBouncingBomb: kind === "airDown",
                 bouncesRemaining: kind === "airDown" ? 2 : 0,
                 x: actor.x + actor.facing * 40,
@@ -1612,8 +1705,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         stageRef.current = selectedStage;
         const stage = stageRef.current;
         worldRef.current = {
-            p1: createInitialFighter("p1", p1Pick.moveSet, stage, p1Pick.renderScaleX, p1Pick.renderScaleY),
-            p2: createInitialFighter("p2", p2Pick.moveSet, stage, p2Pick.renderScaleX, p2Pick.renderScaleY),
+            p1: createInitialFighter("p1", p1Pick, stage),
+            p2: createInitialFighter("p2", p2Pick, stage),
             projectiles: [],
             winner: null,
             startedAt: performance.now(),
@@ -1623,9 +1716,10 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
         const maybeLoad = (src?: string) => src ? loadImage(src).catch(() => null) : Promise.resolve(null);
 
-        // Preload ObjectStore VFX and game sounds in background
+        // Preload ObjectStore VFX, game sounds, and ToonAdmin overrides in background
         preloadVfx();
         preloadGameSounds();
+        loadCharacterRoster(); // ensures overrides are loaded for next match
 
         // Preload tile sprites for stage rendering
         const tileConfig = DEFAULT_TILE_CONFIG;

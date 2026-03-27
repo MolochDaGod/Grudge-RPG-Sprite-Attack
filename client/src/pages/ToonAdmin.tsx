@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GRUDA_ROSTER, type GrudaCharDef, computeCollisionSize, computeRenderScale, getCharAnimData } from "@/lib/grudaRoster";
-import { ACTION_SLOTS, type ActionSlotKey, type CharOverrides, loadOverrides, setCharOverrides, deleteCharOverrides, exportAllOverrides, importOverrides, saveOverridesToServer } from "@/lib/charConfig";
+import { GRUDA_ROSTER, type GrudaCharDef, computeCollisionSize, computeRenderScale, getCharAnimData, computeCollisionSizeWithOverrides } from "@/lib/grudaRoster";
+import { ACTION_SLOTS, type ActionSlotKey, type CharOverrides, type KnockbackAngle, loadOverrides, setCharOverrides, deleteCharOverrides, exportAllOverrides, importOverrides, saveOverridesToServer } from "@/lib/charConfig";
 import { getAllVfx, getVfxCategories, searchVfx, preloadVfx, getVfxById, getVfxImage, drawVfxFrame, type VfxDef } from "@/lib/vfxLibrary";
 import { getFaction, FACTION_IDS } from "@/lib/factions";
 import { getDefaultVfx } from "@/lib/defaultVfx";
@@ -102,6 +102,18 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
   const [serverStatus, setServerStatus] = useState<"saved" | "saving" | "offline" | "">(""); 
   const [vfxLoaded, setVfxLoaded] = useState(false);
   const [facingRight, setFacingRight] = useState(true);
+  const [opponentId, setOpponentId] = useState<string | null>(null);
+  const [comboPlaying, setComboPlaying] = useState(false);
+  const [dragVfxId, setDragVfxId] = useState<string | null>(null);
+
+  // ─── Undo/Redo ────────────────────────────────────────────────
+  const undoStackRef = useRef<string[]>([]);
+  const redoStackRef = useRef<string[]>([]);
+  const pushUndo = useCallback(() => {
+    undoStackRef.current.push(JSON.stringify(overrides));
+    if (undoStackRef.current.length > 50) undoStackRef.current.shift();
+    redoStackRef.current = [];
+  }, [overrides]);
 
   // ─── Editor interaction state ──────────────────────────────────
   const [selectedElement, setSelectedElement] = useState<CanvasElement>(null);
@@ -113,6 +125,7 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const opponentImgRef = useRef<HTMLImageElement | null>(null);
   const frameRef = useRef(0);
   const tickRef = useRef(0);
 
@@ -269,9 +282,42 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
           ctx.restore();
         }
 
-        // Current frame
+        // Current frame — flip sprite when facing left
+        ctx.save();
+        if (!facingRight) {
+          ctx.translate(cx, 0);
+          ctx.scale(-1, 1);
+          ctx.translate(-cx, 0);
+        }
         ctx.drawImage(img, frameRef.current * fw, 0, fw, fh, drawX, drawY, dw, dh);
+        ctx.restore();
         hitRegionsRef.current.push({ id: "sprite", x: drawX, y: drawY, w: dw, h: dh });
+
+        // Opponent preview (idle sprite at fight distance)
+        const oppImg = opponentImgRef.current;
+        if (oppImg && oppImg.complete) {
+          const opp = GRUDA_ROSTER.find(c => c.id === opponentId);
+          if (opp) {
+            const oppFw = oppImg.width / Math.max(1, opp.idle[1]);
+            const oppFh = oppImg.height;
+            const oppBp = getBottomPadding(oppImg);
+            const oppDw = oppFw * scale;
+            const oppDh = oppFh * scale;
+            const oppX = facingRight ? cx + 180 : cx - 180;
+            const oppDrawX = oppX - oppDw / 2;
+            const oppDrawY = cy - oppDh + oppBp * scale;
+            ctx.save();
+            ctx.globalAlpha = 0.5;
+            // Flip opponent to face the main character
+            if (facingRight) {
+              ctx.translate(oppX, 0);
+              ctx.scale(-1, 1);
+              ctx.translate(-oppX, 0);
+            }
+            ctx.drawImage(oppImg, 0, 0, oppFw, oppFh, oppDrawX, oppDrawY, oppDw, oppDh);
+            ctx.restore();
+          }
+        }
 
         // Collision overlay — uses shared computeCollisionSize for exact match with game
         if (showCollision) {
@@ -326,11 +372,15 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
           ctx.strokeRect(cx - colW * 0.35, cy - colH * 0.35, colW * 0.7, colH * 0.35);
           ctx.restore();
 
-          // Weapon hitbox — respects facing direction, only shows on active hit frame
-          const isAttack = previewAnimKey === "attack" || previewAnimKey === "attack2" || previewAnimKey === "special";
+          // Weapon hitbox — uses per-slot hit frame from overrides
+          const isAttack = previewAnimKey === "attack" || previewAnimKey === "attack2" || previewAnimKey === "special" || previewAnimKey === "comboQ2" || previewAnimKey === "comboQ3" || previewAnimKey === "dashAttack" || previewAnimKey === "cast";
           if (isAttack) {
-            const atkReach = scX * 80;
-            const isActiveHitFrame = frameRef.current >= DEFAULT_HIT_FRAME;
+            const slotOv = charOv.actions[previewAnimKey as ActionSlotKey];
+            const slotHitFrame = slotOv?.hitFrame ?? DEFAULT_HIT_FRAME;
+            const slotHitEnd = slotOv?.activeFrameEnd ?? slotHitFrame + 2;
+            const weaponReach = charOv.collider?.weaponReach ?? scX * 80;
+            const atkReach = weaponReach;
+            const isActiveHitFrame = frameRef.current >= slotHitFrame && frameRef.current <= slotHitEnd;
             const weaponX = facing > 0 ? cx + 30 : cx - 30 - atkReach;
             const weaponAlpha = isActiveHitFrame ? 0.7 : 0.2;
             hitRegionsRef.current.push({ id: "weapon", x: weaponX, y: cy - colH * 0.78, w: atkReach, h: colH * 0.5 });
@@ -360,24 +410,30 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
           ctx.fillText("body", eCx - eRx + 2, eCy - eRy + 10);
         }
 
-        // VFX preview — shown for any slot with assigned VFX (not just attack anims)
+        // VFX preview — positioned at weapon hitbox center instead of hardcoded offsets
         if (showVfx && previewAnimKey) {
           const slot = previewAnimKey as ActionSlotKey;
-          const slotOv = charOv.actions[slot];
-          const hitVfxId = slotOv?.hitVfx;
-          const swingVfxId = slotOv?.swingVfx;
+          const slotOvVfx = charOv.actions[slot];
+          const hitVfxId = slotOvVfx?.hitVfx;
+          const swingVfxId = slotOvVfx?.swingVfx;
+          // Use weapon hitbox position for VFX placement
+          const { width: vfxColW, height: vfxColH } = computeCollisionSize(char);
+          const { scaleX: vfxScX } = computeRenderScale(char);
+          const vfxWeaponReach = charOv.collider?.weaponReach ?? vfxScX * 80;
+          const vfxWeaponCx = facingRight ? cx + 30 + vfxWeaponReach / 2 : cx - 30 - vfxWeaponReach / 2;
+          const vfxWeaponCy = cy - vfxColH * 0.53;
           if (hitVfxId) {
             const vfx = getVfxById(hitVfxId);
             if (vfx) {
               const vfxFrame = Math.floor(frameRef.current * 0.7) % vfx.frames;
-              drawVfxFrame(ctx, vfx, vfxFrame, cx + 60, cy - 80, 2.5, !facingRight);
+              drawVfxFrame(ctx, vfx, vfxFrame, vfxWeaponCx + 20, vfxWeaponCy, 2.5, !facingRight);
             }
           }
           if (swingVfxId) {
             const vfx = getVfxById(swingVfxId);
             if (vfx) {
               const vfxFrame = Math.floor(frameRef.current * 0.8) % vfx.frames;
-              drawVfxFrame(ctx, vfx, vfxFrame, cx + 40, cy - 60, 2, !facingRight);
+              drawVfxFrame(ctx, vfx, vfxFrame, vfxWeaponCx, vfxWeaponCy + 15, 2, !facingRight);
             }
           }
         }
@@ -435,16 +491,48 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
     setPlaying(false);
   };
 
-  // Keyboard: arrow keys step frames
+  // Load opponent sprite
+  useEffect(() => {
+    if (!opponentId) { opponentImgRef.current = null; return; }
+    const opp = GRUDA_ROSTER.find(c => c.id === opponentId);
+    if (!opp) return;
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => { opponentImgRef.current = img; };
+    img.src = `/fighter2d/characters/${opp.folder}/${opp.idle[0]}`;
+    return () => { opponentImgRef.current = null; };
+  }, [opponentId]);
+
+  // Keyboard: arrow keys step frames, Ctrl+Z/Y undo/redo
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "ArrowRight") { frameRef.current = (frameRef.current + 1) % totalFrames; setFrame(frameRef.current); setPlaying(false); }
       if (e.key === "ArrowLeft") { frameRef.current = (frameRef.current - 1 + totalFrames) % totalFrames; setFrame(frameRef.current); setPlaying(false); }
       if (e.key === " ") { e.preventDefault(); setPlaying(p => !p); }
+      // Undo
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        const prev = undoStackRef.current.pop();
+        if (prev) {
+          redoStackRef.current.push(JSON.stringify(overrides));
+          setOverrides(JSON.parse(prev));
+          showToast("Undo");
+        }
+      }
+      // Redo
+      if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
+        e.preventDefault();
+        const next = redoStackRef.current.pop();
+        if (next) {
+          undoStackRef.current.push(JSON.stringify(overrides));
+          setOverrides(JSON.parse(next));
+          showToast("Redo");
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [totalFrames]);
+  }, [totalFrames, overrides, showToast]);
 
   // Save all
   const saveAll = async () => {
@@ -489,19 +577,28 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
     input.click();
   };
 
-  // Slot override helpers
+  // Slot override helpers (with undo)
   const setSlotAnim = (slot: ActionSlotKey, file: string, frames: number) => {
+    pushUndo();
     const newOv = { ...overrides };
     if (!newOv[selectedId]) newOv[selectedId] = { actions: {} };
     newOv[selectedId].actions[slot] = { file, frames, hold: autoHold(frames), loop: slot === "idle" || slot === "walk" };
     setOverrides(newOv);
   };
   const setSlotField = (slot: ActionSlotKey, field: string, value: any) => {
+    pushUndo();
     const newOv = { ...overrides };
     const current = getSlotAnim(slot);
     if (!current) return;
     if (!newOv[selectedId]) newOv[selectedId] = { actions: {} };
     newOv[selectedId].actions[slot] = { ...current, [field]: value };
+    setOverrides(newOv);
+  };
+  const setColliderField = (field: string, value: number) => {
+    pushUndo();
+    const newOv = { ...overrides };
+    if (!newOv[selectedId]) newOv[selectedId] = { actions: {} };
+    newOv[selectedId].collider = { ...newOv[selectedId].collider, [field]: value };
     setOverrides(newOv);
   };
 
@@ -645,11 +742,16 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
             <div className="h-6 bg-zinc-800 rounded cursor-pointer relative" onClick={handleScrubberClick}>
               {/* Frame markers — hit frame highlighted for attack anims */}
               {Array.from({ length: totalFrames }, (_, i) => {
-                const isHitFrame = (previewAnimKey === "attack" || previewAnimKey === "attack2" || previewAnimKey === "special") && i === DEFAULT_HIT_FRAME;
+                const slotOvTimeline = previewAnimKey ? charOv.actions[previewAnimKey as ActionSlotKey] : undefined;
+                const hitStart = slotOvTimeline?.hitFrame ?? DEFAULT_HIT_FRAME;
+                const hitEnd = slotOvTimeline?.activeFrameEnd ?? hitStart + 2;
+                const isAtkAnim = ["attack", "attack2", "special", "comboQ2", "comboQ3", "dashAttack", "cast"].includes(previewAnimKey ?? "");
+                const isInHitWindow = isAtkAnim && i >= hitStart && i <= hitEnd;
+                const isHitStart = isAtkAnim && i === hitStart;
                 return (
                 <div key={i} className="absolute top-0 bottom-0" style={{ left: `${(i / totalFrames) * 100}%`, width: `${100 / totalFrames}%` }}>
-                  <div className={`h-full border-r border-white/10 ${i === frame ? "bg-red-500/30" : isHitFrame ? "bg-pink-500/20" : "hover:bg-white/5"}`} />
-                  {isHitFrame && <div className="absolute top-0 left-0 w-full h-1 bg-pink-500/60" title="Hit frame" />}
+                  <div className={`h-full border-r border-white/10 ${i === frame ? "bg-red-500/30" : isInHitWindow ? "bg-pink-500/20" : "hover:bg-white/5"}`} />
+                  {isInHitWindow && <div className="absolute top-0 left-0 w-full h-1 bg-pink-500/60" title={isHitStart ? "Hit start" : "Active"} />}
                 </div>
                 );
               })}
@@ -743,6 +845,31 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
                             )}
                           </div>
                         )}
+                        {/* Hit frame + damage/knockback for attack slots */}
+                        {isAttackSlot && (
+                          <div className="flex flex-wrap gap-1.5 text-[8px] mb-1">
+                            <label className="flex items-center gap-0.5 text-pink-400/60">
+                              Hit F# <input type="number" min={0} max={30} value={current.hitFrame ?? DEFAULT_HIT_FRAME} onChange={e => setSlotField(slot.key, "hitFrame", parseInt(e.target.value) || DEFAULT_HIT_FRAME)} className="w-8 bg-zinc-800 border border-white/10 rounded px-1 py-0.5 text-white/60 text-center" />
+                            </label>
+                            <label className="flex items-center gap-0.5 text-pink-400/60">
+                              End F# <input type="number" min={0} max={30} value={current.activeFrameEnd ?? (current.hitFrame ?? DEFAULT_HIT_FRAME) + 2} onChange={e => setSlotField(slot.key, "activeFrameEnd", parseInt(e.target.value) || (current.hitFrame ?? DEFAULT_HIT_FRAME) + 2)} className="w-8 bg-zinc-800 border border-white/10 rounded px-1 py-0.5 text-white/60 text-center" />
+                            </label>
+                            <label className="flex items-center gap-0.5 text-orange-400/60">
+                              Dmg× <input type="number" min={0.1} max={5} step={0.1} value={current.damageMult ?? 1.0} onChange={e => setSlotField(slot.key, "damageMult", parseFloat(e.target.value) || 1.0)} className="w-10 bg-zinc-800 border border-white/10 rounded px-1 py-0.5 text-white/60 text-center" />
+                            </label>
+                            <label className="flex items-center gap-0.5 text-cyan-400/60">
+                              KB
+                              <select value={current.knockbackAngle ?? "neutral"} onChange={e => setSlotField(slot.key, "knockbackAngle", e.target.value as KnockbackAngle)}
+                                className="bg-zinc-800 border border-white/10 rounded px-1 py-0.5 text-white/60">
+                                <option value="neutral">neutral</option>
+                                <option value="up">up</option>
+                                <option value="down">down</option>
+                                <option value="spike">spike</option>
+                                <option value="forward">forward</option>
+                              </select>
+                            </label>
+                          </div>
+                        )}
                         {/* VFX assignment for attack/special slots */}
                         {isAttackSlot && (() => {
                           const defaults = getDefaultVfx(selectedId, slot.key);
@@ -784,6 +911,7 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
                   {s.label}
                   <input type="number" step={s.step ?? 1} value={(charOv.stats as any)?.[s.key] ?? s.def}
                     onChange={e => {
+                      pushUndo();
                       const newOv = { ...overrides };
                       if (!newOv[selectedId]) newOv[selectedId] = { actions: {} };
                       newOv[selectedId].stats = { ...newOv[selectedId].stats, [s.key]: parseFloat(e.target.value) || s.def };
@@ -793,6 +921,38 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
                 </label>
               ))}
             </div>
+          </div>
+
+          {/* Collider Overrides */}
+          <div className="p-2 border-t border-white/10">
+            <div className="text-[10px] text-white/20 uppercase mb-1">Collider</div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {[
+                { key: "widthMult", label: "Width×", def: 1.0 },
+                { key: "heightMult", label: "Height×", def: 1.0 },
+                { key: "weaponReach", label: "Weapon", def: Math.round(computeRenderScale(char).scaleX * 80) },
+                { key: "headScale", label: "Head×", def: 1.0 },
+                { key: "bodyScale", label: "Body×", def: 1.0 },
+                { key: "legsScale", label: "Legs×", def: 1.0 },
+              ].map(s => (
+                <label key={s.key} className="text-[9px] text-white/30">
+                  {s.label}
+                  <input type="number" step={0.05} value={(charOv.collider as any)?.[s.key] ?? s.def}
+                    onChange={e => setColliderField(s.key, parseFloat(e.target.value) || s.def)}
+                    className="w-full bg-zinc-800 border border-white/10 rounded px-1.5 py-0.5 text-white/60 text-[10px] mt-0.5" />
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Opponent Preview */}
+          <div className="p-2 border-t border-white/10">
+            <div className="text-[10px] text-white/20 uppercase mb-1">Opponent Preview</div>
+            <select value={opponentId ?? ""} onChange={e => setOpponentId(e.target.value || null)}
+              className="w-full bg-zinc-900 border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-white/60">
+              <option value="">-- none --</option>
+              {GRUDA_ROSTER.filter(c => c.id !== selectedId).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
           </div>
 
           {/* VFX Browser */}
@@ -810,13 +970,20 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
             </div>
             <div className="grid grid-cols-3 gap-1 max-h-60 overflow-y-auto">
               {vfxList.slice(0, 60).map(v => (
-                <button key={v.id} onClick={() => showToast(`${v.name}: ${v.frames}f [${v.categories.join(",")}]`)}
-                  className="border border-white/10 rounded p-1 hover:border-red-500/50 bg-zinc-900 text-center">
+                <button key={v.id}
+                  draggable
+                  onDragStart={() => setDragVfxId(v.id)}
+                  onDragEnd={() => setDragVfxId(null)}
+                  onClick={() => showToast(`${v.name}: ${v.frames}f [${v.categories.join(",")}]`)}
+                  className={`border rounded p-1 bg-zinc-900 text-center cursor-grab active:cursor-grabbing ${
+                    dragVfxId === v.id ? "border-red-500 bg-red-500/10" : "border-white/10 hover:border-red-500/50"
+                  }`}>
                   <div className="text-[8px] text-white/50 truncate">{v.name}</div>
                   <div className="text-[7px] text-white/20">{v.frames}f</div>
                 </button>
               ))}
             </div>
+            {dragVfxId && <div className="text-[8px] text-amber-400/60 mt-1">Drag onto an attack slot to assign as VFX</div>}
           </div>
         </div>
       </div>

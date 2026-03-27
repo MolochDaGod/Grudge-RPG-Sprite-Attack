@@ -1207,34 +1207,66 @@ public class TethicalSprites : MonoBehaviour {
 
   // ========== CHARACTER CONFIG PERSISTENCE ==========
   // File-based JSON storage for character editor overrides
+  // Supports admin token auth, atomic partial updates, and config versioning
   const fs = await import("fs");
   const path = await import("path");
   const CHAR_CONFIG_PATH = path.join(process.cwd(), "data", "char-configs.json");
+  const ADMIN_TOKEN = process.env.ADMIN_TOKEN || ""; // set in .env for production
 
   function ensureDataDir() {
     const dir = path.dirname(CHAR_CONFIG_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   }
 
-  function readAllConfigs(): Record<string, any> {
+  interface VersionedConfigs {
+    version: number;
+    configs: Record<string, any>;
+  }
+
+  function readVersioned(): VersionedConfigs {
     try {
       ensureDataDir();
-      if (!fs.existsSync(CHAR_CONFIG_PATH)) return {};
-      return JSON.parse(fs.readFileSync(CHAR_CONFIG_PATH, "utf-8"));
-    } catch { return {}; }
+      if (!fs.existsSync(CHAR_CONFIG_PATH)) return { version: 0, configs: {} };
+      const raw = JSON.parse(fs.readFileSync(CHAR_CONFIG_PATH, "utf-8"));
+      // Migrate: if old format (no version field), wrap it
+      if (raw && typeof raw === "object" && !raw.version) {
+        return { version: 1, configs: raw };
+      }
+      return raw as VersionedConfigs;
+    } catch { return { version: 0, configs: {} }; }
+  }
+
+  function readAllConfigs(): Record<string, any> {
+    return readVersioned().configs;
+  }
+
+  function writeVersioned(data: VersionedConfigs) {
+    ensureDataDir();
+    fs.writeFileSync(CHAR_CONFIG_PATH, JSON.stringify(data, null, 2));
   }
 
   function writeAllConfigs(configs: Record<string, any>) {
-    ensureDataDir();
-    fs.writeFileSync(CHAR_CONFIG_PATH, JSON.stringify(configs, null, 2));
+    const current = readVersioned();
+    writeVersioned({ version: current.version + 1, configs });
   }
 
-  // Get all character configs
+  /** Middleware: check admin token on mutation endpoints */
+  function requireAdmin(req: any, res: any, next: any) {
+    if (!ADMIN_TOKEN) return next(); // no token configured = open access (dev mode)
+    const token = req.headers["x-admin-token"] || req.query.token;
+    if (token !== ADMIN_TOKEN) {
+      return res.status(403).json({ error: "Unauthorized: invalid admin token" });
+    }
+    next();
+  }
+
+  // Get all character configs (public read)
   app.get("/api/char-config", (_req, res) => {
-    res.json(readAllConfigs());
+    const { version, configs } = readVersioned();
+    res.json({ ...configs, _version: version });
   });
 
-  // Get single character config
+  // Get single character config (public read)
   app.get("/api/char-config/:charId", (req, res) => {
     const all = readAllConfigs();
     const config = all[req.params.charId];
@@ -1242,34 +1274,80 @@ public class TethicalSprites : MonoBehaviour {
     res.json(config);
   });
 
-  // Save single character config
-  app.post("/api/char-config/:charId", (req, res) => {
+  // Save single character config (admin only)
+  app.post("/api/char-config/:charId", requireAdmin, (req, res) => {
     try {
       const all = readAllConfigs();
       all[req.params.charId] = req.body;
       writeAllConfigs(all);
-      res.json({ success: true, charId: req.params.charId });
+      const { version } = readVersioned();
+      res.json({ success: true, charId: req.params.charId, version });
     } catch (error) {
       res.status(500).json({ error: "Failed to save config" });
     }
   });
 
-  // Save all configs at once (bulk)
-  app.post("/api/char-config", (req, res) => {
+  // Partial update single character config (admin only) — atomic merge
+  app.patch("/api/char-config/:charId", requireAdmin, (req, res) => {
     try {
-      writeAllConfigs(req.body);
-      res.json({ success: true, count: Object.keys(req.body).length });
+      const all = readAllConfigs();
+      const existing = all[req.params.charId] ?? { actions: {} };
+      // Deep merge: actions are merged at slot level, top-level fields overwritten
+      const patch = req.body;
+      if (patch.actions) {
+        existing.actions = { ...(existing.actions ?? {}), ...patch.actions };
+        delete patch.actions;
+      }
+      if (patch.stats) {
+        existing.stats = { ...(existing.stats ?? {}), ...patch.stats };
+        delete patch.stats;
+      }
+      if (patch.collider) {
+        existing.collider = { ...(existing.collider ?? {}), ...patch.collider };
+        delete patch.collider;
+      }
+      Object.assign(existing, patch);
+      all[req.params.charId] = existing;
+      writeAllConfigs(all);
+      const { version } = readVersioned();
+      res.json({ success: true, charId: req.params.charId, version });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to patch config" });
+    }
+  });
+
+  // Save all configs at once (admin only) — with optional stale-write rejection
+  app.post("/api/char-config", requireAdmin, (req, res) => {
+    try {
+      const expectedVersion = req.headers["x-config-version"];
+      if (expectedVersion) {
+        const current = readVersioned();
+        if (current.version !== parseInt(expectedVersion as string, 10)) {
+          return res.status(409).json({
+            error: "Config version conflict — reload and retry",
+            serverVersion: current.version,
+            clientVersion: parseInt(expectedVersion as string, 10),
+          });
+        }
+      }
+      // Strip _version from client payload if present
+      const payload = { ...req.body };
+      delete payload._version;
+      writeAllConfigs(payload);
+      const { version } = readVersioned();
+      res.json({ success: true, count: Object.keys(payload).length, version });
     } catch (error) {
       res.status(500).json({ error: "Failed to save configs" });
     }
   });
 
-  // Delete single character config
-  app.delete("/api/char-config/:charId", (req, res) => {
+  // Delete single character config (admin only)
+  app.delete("/api/char-config/:charId", requireAdmin, (req, res) => {
     const all = readAllConfigs();
     delete all[req.params.charId];
     writeAllConfigs(all);
-    res.json({ success: true });
+    const { version } = readVersioned();
+    res.json({ success: true, version });
   });
 
   // ========== AI CHAT ROUTES ==========

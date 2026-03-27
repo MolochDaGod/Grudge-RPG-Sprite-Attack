@@ -2,6 +2,7 @@
 // All sprites at /fighter2d/characters/<folder>/<file>.png
 
 import type { FactionId } from "./factions";
+import type { CharOverrides, ActionSlotKey, AllOverrides, ColliderOverrides } from "./charConfig";
 
 export interface GrudaCharDef {
   id: string;
@@ -66,6 +67,52 @@ export function getCharAnimData(char: GrudaCharDef, slot: string): [string, numb
         cast: char.cast, special: char.special, roll: char.roll,
     };
     return map[slot];
+}
+
+/** Apply ToonAdmin overrides onto a base GrudaCharDef, returning a merged copy */
+export function applyOverrides(base: GrudaCharDef, ov: CharOverrides | undefined): GrudaCharDef {
+    if (!ov) return base;
+    const merged = { ...base };
+
+    // Stat overrides
+    if (ov.stats?.atk !== undefined) merged.atk = ov.stats.atk;
+    if (ov.stats?.spd !== undefined) merged.spd = ov.stats.spd;
+    if (ov.stats?.superDmg !== undefined) merged.superDmg = ov.stats.superDmg;
+
+    // Effect / projectile overrides
+    if (ov.effectSrc) merged.effectSrc = ov.effectSrc;
+    if (ov.effectFrames) merged.effectFrames = ov.effectFrames;
+    if (ov.projectile) merged.projectile = ov.projectile;
+
+    // Animation slot overrides — remap file and frame count
+    const animSlots: (keyof GrudaCharDef & string)[] = [
+        "idle", "walk", "attack", "attack2", "hurt", "death",
+        "jump", "fall", "block", "cast", "special", "roll",
+    ];
+    for (const slot of animSlots) {
+        const actionOv = ov.actions[slot as ActionSlotKey];
+        if (actionOv) {
+            (merged as any)[slot] = [actionOv.file, actionOv.frames];
+        }
+    }
+
+    return merged;
+}
+
+/** Build a full roster with overrides applied */
+export function buildRosterWithOverrides(overrides: AllOverrides): GrudaCharDef[] {
+    return GRUDA_ROSTER.map(char => applyOverrides(char, overrides[char.id]));
+}
+
+/** Get override-aware collision size */
+export function computeCollisionSizeWithOverrides(
+    g: GrudaCharDef, collider?: ColliderOverrides
+): { width: number; height: number } {
+    const base = computeCollisionSize(g);
+    return {
+        width: Math.round(base.width * (collider?.widthMult ?? 1.0)),
+        height: Math.round(base.height * (collider?.heightMult ?? 1.0)),
+    };
 }
 
 export const GRUDA_ROSTER: GrudaCharDef[] = [
