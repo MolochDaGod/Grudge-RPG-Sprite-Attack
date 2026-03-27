@@ -123,6 +123,16 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
   const hitRegionsRef = useRef<{ id: CanvasElement; x: number; y: number; w: number; h: number }[]>([]);
   const selectedElementRef = useRef<CanvasElement>(null);
 
+  // ─── Drag state for hitbox editing ─────────────────────────────
+  const dragRef = useRef<{
+    element: CanvasElement;
+    edge: "move" | "left" | "right" | "top" | "bottom";
+    startX: number;
+    startY: number;
+    startRect: { x: number; y: number; w: number; h: number };
+  } | null>(null);
+  const overridesAtDragStart = useRef<string>("");
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const opponentImgRef = useRef<HTMLImageElement | null>(null);
@@ -166,21 +176,132 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
     return null;
   }, []);
 
-  const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const pos = getCanvasPos(e);
-    if (!pos) return;
-    setSelectedElement(hitTestCanvas(pos.x, pos.y));
-    setContextMenu(prev => ({ ...prev, visible: false }));
-  }, [getCanvasPos, hitTestCanvas]);
+  // Detect if click is near an edge (for resize) or center (for move)
+  const detectEdge = useCallback((px: number, py: number, region: { x: number; y: number; w: number; h: number }): "move" | "left" | "right" | "top" | "bottom" => {
+    const EDGE = 8;
+    if (px - region.x < EDGE) return "left";
+    if (region.x + region.w - px < EDGE) return "right";
+    if (py - region.y < EDGE) return "top";
+    if (region.y + region.h - py < EDGE) return "bottom";
+    return "move";
+  }, []);
 
-  const handleCanvasRightClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
+  const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (e.button === 2) {
+      // right-click: context menu
+      e.preventDefault();
+      const pos = getCanvasPos(e);
+      if (!pos) return;
+      const el = hitTestCanvas(pos.x, pos.y);
+      setSelectedElement(el);
+      setContextMenu({ x: e.clientX, y: e.clientY, visible: true, element: el });
+      return;
+    }
     const pos = getCanvasPos(e);
     if (!pos) return;
+    setContextMenu(prev => ({ ...prev, visible: false }));
     const el = hitTestCanvas(pos.x, pos.y);
     setSelectedElement(el);
-    setContextMenu({ x: e.clientX, y: e.clientY, visible: true, element: el });
-  }, [getCanvasPos, hitTestCanvas]);
+    // Start drag on collider elements
+    if (el && ["body", "head", "legs", "weapon"].includes(el)) {
+      const region = hitRegionsRef.current.find(r => r.id === el);
+      if (region) {
+        overridesAtDragStart.current = JSON.stringify(overrides);
+        dragRef.current = {
+          element: el,
+          edge: detectEdge(pos.x, pos.y, region),
+          startX: pos.x,
+          startY: pos.y,
+          startRect: { ...region },
+        };
+      }
+    }
+  }, [getCanvasPos, hitTestCanvas, detectEdge, overrides]);
+
+  const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const drag = dragRef.current;
+    if (!drag) {
+      // Update cursor based on what's under mouse
+      const pos = getCanvasPos(e);
+      if (!pos) return;
+      const el = hitTestCanvas(pos.x, pos.y);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      if (el && ["body", "head", "legs", "weapon"].includes(el)) {
+        const region = hitRegionsRef.current.find(r => r.id === el);
+        if (region) {
+          const edge = detectEdge(pos.x, pos.y, region);
+          canvas.style.cursor = edge === "left" || edge === "right" ? "ew-resize" : edge === "top" || edge === "bottom" ? "ns-resize" : "grab";
+        }
+      } else {
+        canvas.style.cursor = "crosshair";
+      }
+      return;
+    }
+    const pos = getCanvasPos(e);
+    if (!pos) return;
+    const dx = pos.x - drag.startX;
+    const dy = pos.y - drag.startY;
+    const { startRect, element, edge } = drag;
+
+    // Compute the actual game-space collision size for ratio calculations
+    const { scaleX: scX } = computeRenderScale(char);
+    const baseColW = Math.round(80 * Math.max(0.6, Math.min(scX, 2.0)));
+    const { scaleY: scY } = computeRenderScale(char);
+    const baseColH = Math.round(160 * Math.max(0.6, Math.min(scY, 2.0)));
+
+    if (element === "body") {
+      // Dragging body = resize overall collider width/height
+      const curOv = overrides[selectedId]?.collider ?? {};
+      const curWM = curOv.widthMult ?? 1.0;
+      const curHM = curOv.heightMult ?? 1.0;
+      let newWM = curWM, newHM = curHM;
+      if (edge === "left" || edge === "right") {
+        const pixelDelta = edge === "right" ? dx : -dx;
+        newWM = Math.max(0.3, curWM + (pixelDelta / baseColW) * 2);
+      } else if (edge === "top" || edge === "bottom") {
+        const pixelDelta = edge === "bottom" ? dy : -dy;
+        newHM = Math.max(0.3, curHM + (pixelDelta / baseColH) * 2);
+      } else {
+        // move = adjust both
+        newWM = Math.max(0.3, curWM + (dx / baseColW) * 0.5);
+        newHM = Math.max(0.3, curHM + (-dy / baseColH) * 0.5);
+      }
+      const newOv = { ...overrides };
+      if (!newOv[selectedId]) newOv[selectedId] = { actions: {} };
+      newOv[selectedId].collider = { ...newOv[selectedId].collider, widthMult: Math.round(newWM * 100) / 100, heightMult: Math.round(newHM * 100) / 100 };
+      setOverrides(newOv);
+    } else if (element === "weapon") {
+      // Dragging weapon = resize reach
+      const curReach = overrides[selectedId]?.collider?.weaponReach ?? scX * 80;
+      let newReach = curReach;
+      if (edge === "right" || edge === "left") {
+        newReach = Math.max(10, curReach + dx);
+      } else if (edge === "move") {
+        newReach = Math.max(10, curReach + dx);
+      }
+      const newOv = { ...overrides };
+      if (!newOv[selectedId]) newOv[selectedId] = { actions: {} };
+      newOv[selectedId].collider = { ...newOv[selectedId].collider, weaponReach: Math.round(newReach) };
+      setOverrides(newOv);
+    }
+    // Update start position for next delta
+    drag.startX = pos.x;
+    drag.startY = pos.y;
+  }, [getCanvasPos, hitTestCanvas, detectEdge, char, overrides, selectedId]);
+
+  const handleCanvasMouseUp = useCallback(() => {
+    if (dragRef.current) {
+      // Push undo with the state from before drag started
+      const before = overridesAtDragStart.current;
+      if (before && before !== JSON.stringify(overrides)) {
+        undoStackRef.current.push(before);
+        if (undoStackRef.current.length > 50) undoStackRef.current.shift();
+        redoStackRef.current = [];
+      }
+      dragRef.current = null;
+    }
+  }, [overrides]);
 
   const toggleGroup = useCallback((groupId: string) => {
     setExpandedGroups(prev => {
@@ -319,20 +440,40 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
           }
         }
 
-        // Collision overlay — uses shared computeCollisionSize for exact match with game
+        // ─── Collision overlay ─────────────────────────────────────
+        // Sizes match the GAME exactly: uses the same formula as createInitialFighter
+        // then scaled to canvas via (canvasSize / gameSize) so boxes wrap the sprite correctly.
         if (showCollision) {
-          const { width: colW, height: colH } = computeCollisionSize(char);
-          const { scaleX: scX } = computeRenderScale(char);
+          const { scaleX: scX, scaleY: scY } = computeRenderScale(char);
+          const colOv = charOv.collider;
+          // Game-truth collision size (px in game world)
+          const gameW = Math.round(80 * Math.max(0.6, Math.min(scX, 2.0))) * (colOv?.widthMult ?? 1.0);
+          const gameH = Math.round(160 * Math.max(0.6, Math.min(scY, 2.0))) * (colOv?.heightMult ?? 1.0);
+          // Scale factor: how many canvas pixels per game pixel
+          // The sprite is drawn at (fw * scale) wide / (fh * scale) tall on canvas
+          // In-game the sprite is drawn at ~300px base height * renderScaleY
+          // So canvas-to-game ratio = (fh * scale) / (300 * scY)
+          const canvasSpriteH = fh * scale;
+          const gameSpriteH = 300 * scY; // drawHeight in GrudgeFighter2D
+          const pxRatio = canvasSpriteH / gameSpriteH;
+          // Collision rect in canvas space
+          const colW = gameW * pxRatio;
+          const colH = gameH * pxRatio;
           const facing = facingRight ? 1 : -1;
-          hitRegionsRef.current.push({ id: "head", x: cx - colW * 0.3, y: cy - colH, w: colW * 0.6, h: colH * 0.25 });
-          hitRegionsRef.current.push({ id: "body", x: cx - colW * 0.4, y: cy - colH * 0.75, w: colW * 0.8, h: colH * 0.4 });
-          hitRegionsRef.current.push({ id: "legs", x: cx - colW * 0.35, y: cy - colH * 0.35, w: colW * 0.7, h: colH * 0.35 });
+
+          // Game uses these exact fractions (headBox, bodyBox, legsBox in GrudgeFighter2D)
+          const headR = { x: cx - colW * 0.3, y: cy - colH, w: colW * 0.6, h: colH * 0.25 };
+          const bodyR = { x: cx - colW * 0.4, y: cy - colH * 0.75, w: colW * 0.8, h: colH * 0.4 };
+          const legsR = { x: cx - colW * 0.35, y: cy - colH * 0.35, w: colW * 0.7, h: colH * 0.35 };
+          hitRegionsRef.current.push({ id: "head", ...headR });
+          hitRegionsRef.current.push({ id: "body", x: cx - colW / 2, y: cy - colH, w: colW, h: colH }); // full body for dragging
+          hitRegionsRef.current.push({ id: "legs", ...legsR });
+
+          // Body ellipse (game uses bodyEllipse: cx=fighter.x, cy=fighter.y-height/2, rx=width/2, ry=height/2)
           const eCx = cx;
           const eCy = cy - colH / 2;
           const eRx = colW / 2;
           const eRy = colH / 2;
-
-          // Body ellipse
           ctx.save();
           ctx.strokeStyle = "#facc15";
           ctx.lineWidth = 2;
@@ -346,94 +487,80 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
           ctx.restore();
 
           // Head zone
-          ctx.save();
-          ctx.strokeStyle = "#ef4444";
-          ctx.lineWidth = 1;
-          ctx.globalAlpha = 0.35;
-          ctx.setLineDash([3, 3]);
-          ctx.strokeRect(cx - colW * 0.3, cy - colH, colW * 0.6, colH * 0.25);
+          ctx.save(); ctx.strokeStyle = "#ef4444"; ctx.lineWidth = 1; ctx.globalAlpha = 0.4; ctx.setLineDash([3, 3]);
+          ctx.strokeRect(headR.x, headR.y, headR.w, headR.h);
           ctx.restore();
-
           // Body zone
-          ctx.save();
-          ctx.strokeStyle = "#22c55e";
-          ctx.lineWidth = 1;
-          ctx.globalAlpha = 0.35;
-          ctx.setLineDash([3, 3]);
-          ctx.strokeRect(cx - colW * 0.4, cy - colH * 0.75, colW * 0.8, colH * 0.4);
+          ctx.save(); ctx.strokeStyle = "#22c55e"; ctx.lineWidth = 1; ctx.globalAlpha = 0.4; ctx.setLineDash([3, 3]);
+          ctx.strokeRect(bodyR.x, bodyR.y, bodyR.w, bodyR.h);
           ctx.restore();
-
           // Legs zone
-          ctx.save();
-          ctx.strokeStyle = "#3b82f6";
-          ctx.lineWidth = 1;
-          ctx.globalAlpha = 0.35;
-          ctx.setLineDash([3, 3]);
-          ctx.strokeRect(cx - colW * 0.35, cy - colH * 0.35, colW * 0.7, colH * 0.35);
+          ctx.save(); ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 1; ctx.globalAlpha = 0.4; ctx.setLineDash([3, 3]);
+          ctx.strokeRect(legsR.x, legsR.y, legsR.w, legsR.h);
           ctx.restore();
 
-          // Weapon hitbox — uses per-slot hit frame from overrides
-          const isAttack = previewAnimKey === "attack" || previewAnimKey === "attack2" || previewAnimKey === "special" || previewAnimKey === "comboQ2" || previewAnimKey === "comboQ3" || previewAnimKey === "dashAttack" || previewAnimKey === "cast";
+          // Size label
+          ctx.fillStyle = "rgba(255,255,255,0.3)"; ctx.font = "9px monospace";
+          ctx.fillText(`${Math.round(gameW)}×${Math.round(gameH)}`, eCx - eRx + 2, eCy - eRy + 10);
+
+          // Weapon hitbox
+          const isAttack = ["attack", "attack2", "special", "comboQ2", "comboQ3", "dashAttack", "cast"].includes(previewAnimKey ?? "");
           if (isAttack) {
             const slotOv = charOv.actions[previewAnimKey as ActionSlotKey];
             const slotHitFrame = slotOv?.hitFrame ?? DEFAULT_HIT_FRAME;
             const slotHitEnd = slotOv?.activeFrameEnd ?? slotHitFrame + 2;
-            const weaponReach = charOv.collider?.weaponReach ?? scX * 80;
-            const atkReach = weaponReach;
+            // Game weapon reach in game pixels, then scale to canvas
+            const gameReach = colOv?.weaponReach ?? scX * 80;
+            const atkReach = gameReach * pxRatio;
+            const atkHeight = colH * 0.5;
             const isActiveHitFrame = frameRef.current >= slotHitFrame && frameRef.current <= slotHitEnd;
-            const weaponX = facing > 0 ? cx + 30 : cx - 30 - atkReach;
+            // Game offsets weapon at +30px from center — scale that too
+            const weaponOffset = 30 * pxRatio;
+            const weaponX = facing > 0 ? cx + weaponOffset : cx - weaponOffset - atkReach;
+            const weaponY = cy - colH * 0.78;
             const weaponAlpha = isActiveHitFrame ? 0.7 : 0.2;
-            hitRegionsRef.current.push({ id: "weapon", x: weaponX, y: cy - colH * 0.78, w: atkReach, h: colH * 0.5 });
+            hitRegionsRef.current.push({ id: "weapon", x: weaponX, y: weaponY, w: atkReach, h: atkHeight });
             ctx.save();
             ctx.strokeStyle = isActiveHitFrame ? "#f472b6" : "#f472b650";
             ctx.lineWidth = 2;
             ctx.globalAlpha = weaponAlpha;
-            ctx.strokeRect(weaponX, cy - colH * 0.78, atkReach, colH * 0.5);
+            ctx.strokeRect(weaponX, weaponY, atkReach, atkHeight);
             ctx.fillStyle = "#f472b6";
             ctx.globalAlpha = isActiveHitFrame ? 0.12 : 0.03;
-            ctx.fillRect(weaponX, cy - colH * 0.78, atkReach, colH * 0.5);
+            ctx.fillRect(weaponX, weaponY, atkReach, atkHeight);
             ctx.globalAlpha = weaponAlpha;
             ctx.font = "bold 9px monospace";
-            ctx.fillText(isActiveHitFrame ? "WEAPON (HIT)" : "WEAPON", weaponX + 2, cy - colH * 0.78 + 10);
+            ctx.fillText(isActiveHitFrame ? `WEAPON (HIT) ${Math.round(gameReach)}px` : `WEAPON ${Math.round(gameReach)}px`, weaponX + 2, weaponY + 10);
             ctx.restore();
           }
 
-          // Foot dot
+          // Foot position dot
           ctx.fillStyle = "#fff";
-          ctx.beginPath();
-          ctx.arc(cx, cy, 3, 0, Math.PI * 2);
-          ctx.fill();
-
-          // Labels
-          ctx.fillStyle = "rgba(255,255,255,0.3)";
-          ctx.font = "9px monospace";
-          ctx.fillText("body", eCx - eRx + 2, eCy - eRy + 10);
+          ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
         }
 
-        // VFX preview — positioned at weapon hitbox center instead of hardcoded offsets
+        // VFX preview at weapon hitbox center
         if (showVfx && previewAnimKey) {
           const slot = previewAnimKey as ActionSlotKey;
           const slotOvVfx = charOv.actions[slot];
           const hitVfxId = slotOvVfx?.hitVfx;
           const swingVfxId = slotOvVfx?.swingVfx;
-          // Use weapon hitbox position for VFX placement
-          const { width: vfxColW, height: vfxColH } = computeCollisionSize(char);
-          const { scaleX: vfxScX } = computeRenderScale(char);
-          const vfxWeaponReach = charOv.collider?.weaponReach ?? vfxScX * 80;
-          const vfxWeaponCx = facingRight ? cx + 30 + vfxWeaponReach / 2 : cx - 30 - vfxWeaponReach / 2;
-          const vfxWeaponCy = cy - vfxColH * 0.53;
-          if (hitVfxId) {
-            const vfx = getVfxById(hitVfxId);
-            if (vfx) {
-              const vfxFrame = Math.floor(frameRef.current * 0.7) % vfx.frames;
-              drawVfxFrame(ctx, vfx, vfxFrame, vfxWeaponCx + 20, vfxWeaponCy, 2.5, !facingRight);
+          if (hitVfxId || swingVfxId) {
+            const { scaleX: vScX, scaleY: vScY } = computeRenderScale(char);
+            const vGameH = Math.round(160 * Math.max(0.6, Math.min(vScY, 2.0))) * (charOv.collider?.heightMult ?? 1.0);
+            const vPxRatio = (fh * scale) / (300 * vScY);
+            const vColH = vGameH * vPxRatio;
+            const vReach = (charOv.collider?.weaponReach ?? vScX * 80) * vPxRatio;
+            const vOff = 30 * vPxRatio;
+            const vCenterX = facingRight ? cx + vOff + vReach / 2 : cx - vOff - vReach / 2;
+            const vCenterY = cy - vColH * 0.53;
+            if (hitVfxId) {
+              const vfx = getVfxById(hitVfxId);
+              if (vfx) drawVfxFrame(ctx, vfx, Math.floor(frameRef.current * 0.7) % vfx.frames, vCenterX, vCenterY, 2.5, !facingRight);
             }
-          }
-          if (swingVfxId) {
-            const vfx = getVfxById(swingVfxId);
-            if (vfx) {
-              const vfxFrame = Math.floor(frameRef.current * 0.8) % vfx.frames;
-              drawVfxFrame(ctx, vfx, vfxFrame, vfxWeaponCx, vfxWeaponCy + 15, 2, !facingRight);
+            if (swingVfxId) {
+              const vfx = getVfxById(swingVfxId);
+              if (vfx) drawVfxFrame(ctx, vfx, Math.floor(frameRef.current * 0.8) % vfx.frames, vCenterX, vCenterY + 15, 2, !facingRight);
             }
           }
         }
@@ -724,8 +851,11 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
           {/* Canvas */}
           <div className="flex-1 flex items-center justify-center overflow-hidden">
             <canvas ref={canvasRef} width={STAGE_W} height={STAGE_H}
-              onClick={handleCanvasClick}
-              onContextMenu={handleCanvasRightClick}
+              onMouseDown={handleCanvasMouseDown}
+              onMouseMove={handleCanvasMouseMove}
+              onMouseUp={handleCanvasMouseUp}
+              onMouseLeave={handleCanvasMouseUp}
+              onContextMenu={e => e.preventDefault()}
               className="border border-white/5 rounded cursor-crosshair" style={{ imageRendering: "pixelated" }} />
           </div>
 
