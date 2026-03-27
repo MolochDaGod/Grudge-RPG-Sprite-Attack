@@ -50,24 +50,42 @@ const GROUP_COLORS: Record<string, string> = {
 
 const ALPHA_THRESHOLD = 8;
 const paddingCache = new Map<string, number>();
+const boundsCache = new Map<string, { top: number; bottom: number; left: number; right: number }>();
+
 function getBottomPadding(img: HTMLImageElement): number {
   const key = img.src;
   if (paddingCache.has(key)) return paddingCache.get(key)!;
+  getVisibleBounds(img); // populates both caches
+  return paddingCache.get(key) ?? 0;
+}
+
+/** Get the tight visible-pixel bounds of a sprite sheet (first frame) */
+function getVisibleBounds(img: HTMLImageElement): { top: number; bottom: number; left: number; right: number } {
+  const key = img.src;
+  if (boundsCache.has(key)) return boundsCache.get(key)!;
   const c = document.createElement("canvas");
   c.width = img.naturalWidth || img.width;
   c.height = img.naturalHeight || img.height;
   const ctx = c.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return 0;
+  if (!ctx) { const d = { top: 0, bottom: c.height, left: 0, right: c.width }; boundsCache.set(key, d); paddingCache.set(key, 0); return d; }
   ctx.drawImage(img, 0, 0);
   const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
-  let pad = 0;
-  for (let y = height - 1; y >= 0; y--) {
+  let minY = height, maxY = 0, minX = width, maxX = 0;
+  for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      if (data[(y * width + x) * 4 + 3] > ALPHA_THRESHOLD) { pad = height - 1 - y; paddingCache.set(key, pad); return pad; }
+      if (data[(y * width + x) * 4 + 3] > ALPHA_THRESHOLD) {
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+      }
     }
   }
-  paddingCache.set(key, pad);
-  return pad;
+  if (maxY < minY) { minY = 0; maxY = height - 1; minX = 0; maxX = width - 1; }
+  const result = { top: minY, bottom: height - 1 - maxY, left: minX, right: width - 1 - maxX };
+  boundsCache.set(key, result);
+  paddingCache.set(key, result.bottom);
+  return result;
 }
 
 const autoHold = (f: number) => f > 20 ? 2 : f > 10 ? 3 : f > 6 ? 4 : 5;
@@ -202,8 +220,8 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
     setContextMenu(prev => ({ ...prev, visible: false }));
     const el = hitTestCanvas(pos.x, pos.y);
     setSelectedElement(el);
-    // Start drag on collider elements
-    if (el && ["body", "head", "legs", "weapon"].includes(el)) {
+    // Start drag on collider elements or sprite
+    if (el && ["body", "head", "legs", "weapon", "sprite"].includes(el)) {
       const region = hitRegionsRef.current.find(r => r.id === el);
       if (region) {
         overridesAtDragStart.current = JSON.stringify(overrides);
@@ -227,11 +245,11 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
       const el = hitTestCanvas(pos.x, pos.y);
       const canvas = canvasRef.current;
       if (!canvas) return;
-      if (el && ["body", "head", "legs", "weapon"].includes(el)) {
+      if (el && ["body", "head", "legs", "weapon", "sprite"].includes(el)) {
         const region = hitRegionsRef.current.find(r => r.id === el);
         if (region) {
           const edge = detectEdge(pos.x, pos.y, region);
-          canvas.style.cursor = edge === "left" || edge === "right" ? "ew-resize" : edge === "top" || edge === "bottom" ? "ns-resize" : "grab";
+          canvas.style.cursor = el === "sprite" ? "move" : edge === "left" || edge === "right" ? "ew-resize" : edge === "top" || edge === "bottom" ? "ns-resize" : "grab";
         }
       } else {
         canvas.style.cursor = "crosshair";
@@ -244,34 +262,39 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
     const dy = pos.y - drag.startY;
     const { element, edge } = drag;
 
-    // pxRatio: canvas pixels per game pixel (same formula as render loop)
+    // Get visible sprite bounds for base collider size (matches render loop)
     const img = imgRef.current;
     const { scaleX: scX, scaleY: scY } = computeRenderScale(char);
     const fh = img ? img.height : char.frameSize;
+    const fw = img ? img.width / Math.max(1, previewFrameCount) : char.frameSize;
     const pxRatio = (fh * scale) / (300 * scY);
-    // Convert canvas-pixel drag delta to game-pixel delta
-    const gameDx = dx / pxRatio;
-    const gameDy = dy / pxRatio;
 
-    const baseColW = Math.round(80 * Math.max(0.6, Math.min(scX, 2.0)));
-    const baseColH = Math.round(160 * Math.max(0.6, Math.min(scY, 2.0)));
+    // Visible sprite size in canvas px (the base for widthMult/heightMult=1.0)
+    let baseVisW = fw * scale;
+    let baseVisH = fh * scale;
+    if (img) {
+      const vb = getVisibleBounds(img);
+      const vbLeft = Math.min(vb.left, fw - 1);
+      const vbRight = Math.max(0, fw - 1 - Math.min(vb.right, fw - 1));
+      baseVisW = Math.max(10, (vbRight - vbLeft + 1) * scale);
+      baseVisH = Math.max(10, (fh - vb.top - vb.bottom) * scale);
+    }
 
     if (element === "body") {
       const curOv = overrides[selectedId]?.collider ?? {};
       const curWM = curOv.widthMult ?? 1.0;
       const curHM = curOv.heightMult ?? 1.0;
       let newWM = curWM, newHM = curHM;
+      // dx/dy are in canvas pixels. baseVisW is the 1.0x size in canvas pixels.
       if (edge === "left" || edge === "right") {
-        // Each side moves by gameDx, so full width changes by 2*gameDx
         const sign = edge === "right" ? 1 : -1;
-        newWM = Math.max(0.3, curWM + (sign * gameDx * 2) / baseColW);
+        newWM = Math.max(0.2, curWM + (sign * dx * 2) / baseVisW);
       } else if (edge === "top" || edge === "bottom") {
         const sign = edge === "bottom" ? 1 : -1;
-        newHM = Math.max(0.3, curHM + (sign * gameDy * 2) / baseColH);
+        newHM = Math.max(0.2, curHM + (sign * dy * 2) / baseVisH);
       } else {
-        // Center drag: scale both proportionally
-        newWM = Math.max(0.3, curWM + (gameDx * 2) / baseColW);
-        newHM = Math.max(0.3, curHM + (-gameDy * 2) / baseColH);
+        newWM = Math.max(0.2, curWM + (dx * 2) / baseVisW);
+        newHM = Math.max(0.2, curHM + (-dy * 2) / baseVisH);
       }
       const newOv = { ...overrides };
       if (!newOv[selectedId]) newOv[selectedId] = { actions: {} };
@@ -279,17 +302,23 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
       setOverrides(newOv);
     } else if (element === "weapon") {
       // Weapon reach is in game pixels — convert canvas dx to game px
+      const gameDx = dx / pxRatio;
       const curReach = overrides[selectedId]?.collider?.weaponReach ?? scX * 80;
       const newReach = Math.max(10, curReach + gameDx);
       const newOv = { ...overrides };
       if (!newOv[selectedId]) newOv[selectedId] = { actions: {} };
       newOv[selectedId].collider = { ...newOv[selectedId].collider, weaponReach: Math.round(newReach) };
       setOverrides(newOv);
+    } else if (element === "sprite") {
+      // Dragging sprite: vertical drag = scale, horizontal = no-op (centered)
+      // Drag up = bigger, drag down = smaller
+      const newScale = Math.max(1, Math.min(8, scale + (-dy * 0.02)));
+      setScale(Math.round(newScale * 10) / 10);
     }
     // Update start position for next delta
     drag.startX = pos.x;
     drag.startY = pos.y;
-  }, [getCanvasPos, hitTestCanvas, detectEdge, char, overrides, selectedId, scale]);
+  }, [getCanvasPos, hitTestCanvas, detectEdge, char, overrides, selectedId, scale, previewFrameCount]);
 
   const handleCanvasMouseUp = useCallback(() => {
     if (dragRef.current) {
@@ -413,7 +442,27 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
         }
         ctx.drawImage(img, frameRef.current * fw, 0, fw, fh, drawX, drawY, dw, dh);
         ctx.restore();
-        hitRegionsRef.current.push({ id: "sprite", x: drawX, y: drawY, w: dw, h: dh });
+
+        // Sprite hit region: tight to visible pixels, not the full transparent frame
+        const vb = getVisibleBounds(img);
+        // Bounds are for the full sheet — clamp left/right to first frame width
+        const vbLeft = Math.min(vb.left, fw - 1);
+        const vbRight = Math.max(0, fw - 1 - Math.min(vb.right, fw - 1));
+        const spriteVisX = drawX + vbLeft * scale;
+        const spriteVisY = drawY + vb.top * scale;
+        const spriteVisW = (vbRight - vbLeft + 1) * scale;
+        const spriteVisH = (fh - vb.top - vb.bottom) * scale;
+        hitRegionsRef.current.push({ id: "sprite", x: spriteVisX, y: spriteVisY, w: Math.max(spriteVisW, 10), h: Math.max(spriteVisH, 10) });
+
+        // Draw thin outline around visible sprite region so you can see it
+        if (showCollision) {
+          ctx.save();
+          ctx.strokeStyle = "rgba(255,255,255,0.15)";
+          ctx.lineWidth = 1;
+          ctx.setLineDash([2, 4]);
+          ctx.strokeRect(spriteVisX, spriteVisY, spriteVisW, spriteVisH);
+          ctx.restore();
+        }
 
         // Opponent preview (idle sprite at fight distance)
         const oppImg = opponentImgRef.current;
@@ -442,25 +491,22 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
         }
 
         // ─── Collision overlay ─────────────────────────────────────
-        // Sizes match the GAME exactly: uses the same formula as createInitialFighter
-        // then scaled to canvas via (canvasSize / gameSize) so boxes wrap the sprite correctly.
+        // Default: collider wraps the visible sprite pixels (feet to head)
+        // User overrides (widthMult/heightMult) scale relative to that visible size
         if (showCollision) {
           const { scaleX: scX, scaleY: scY } = computeRenderScale(char);
           const colOv = charOv.collider;
-          // Game-truth collision size (px in game world)
-          const gameW = Math.round(80 * Math.max(0.6, Math.min(scX, 2.0))) * (colOv?.widthMult ?? 1.0);
-          const gameH = Math.round(160 * Math.max(0.6, Math.min(scY, 2.0))) * (colOv?.heightMult ?? 1.0);
-          // Scale factor: how many canvas pixels per game pixel
-          // The sprite is drawn at (fw * scale) wide / (fh * scale) tall on canvas
-          // In-game the sprite is drawn at ~300px base height * renderScaleY
-          // So canvas-to-game ratio = (fh * scale) / (300 * scY)
-          const canvasSpriteH = fh * scale;
-          const gameSpriteH = 300 * scY; // drawHeight in GrudgeFighter2D
-          const pxRatio = canvasSpriteH / gameSpriteH;
-          // Collision rect in canvas space
-          const colW = gameW * pxRatio;
-          const colH = gameH * pxRatio;
+          // Visible sprite bounds in canvas pixels
+          const visW = spriteVisW;
+          const visH = spriteVisH;
+          // Apply user multipliers on top of visible bounds
+          const colW = visW * (colOv?.widthMult ?? 1.0);
+          const colH = visH * (colOv?.heightMult ?? 1.0);
           const facing = facingRight ? 1 : -1;
+          // pxRatio for weapon reach (still needs game-to-canvas conversion)
+          const canvasSpriteH = fh * scale;
+          const gameSpriteH = 300 * scY;
+          const pxRatio = canvasSpriteH / gameSpriteH;
 
           // Game uses these exact fractions (headBox, bodyBox, legsBox in GrudgeFighter2D)
           const headR = { x: cx - colW * 0.3, y: cy - colH, w: colW * 0.6, h: colH * 0.25 };
