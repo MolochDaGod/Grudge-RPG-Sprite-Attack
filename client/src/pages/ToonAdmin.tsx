@@ -15,6 +15,14 @@ interface ContextMenuState {
   element: CanvasElement;
 }
 
+interface PanelContextMenu {
+  x: number;
+  y: number;
+  visible: boolean;
+  charId: string;
+  charName: string;
+}
+
 const EDITOR_STAGES = [
   { id: "battlefield", name: "Grudge Battlefield" },
   { id: "pirate", name: "Pirate's Cove" },
@@ -136,6 +144,7 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
   // ─── Editor interaction state ──────────────────────────────────
   const [selectedElement, setSelectedElement] = useState<CanvasElement>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ x: 0, y: 0, visible: false, element: null });
+  const [panelMenu, setPanelMenu] = useState<PanelContextMenu>({ x: 0, y: 0, visible: false, charId: "", charName: "" });
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["toons", "crusade", "legion", "fabled", "maps"]));
   const [selectedMapId, setSelectedMapId] = useState<string | null>(null);
   const hitRegionsRef = useRef<{ id: CanvasElement; x: number; y: number; w: number; h: number }[]>([]);
@@ -171,13 +180,16 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
   // Keep ref in sync for render loop
   useEffect(() => { selectedElementRef.current = selectedElement; }, [selectedElement]);
 
-  // Close context menu on outside click
+  // Close context menus on outside click
   useEffect(() => {
-    if (!contextMenu.visible) return;
-    const close = () => setContextMenu(prev => ({ ...prev, visible: false }));
+    if (!contextMenu.visible && !panelMenu.visible) return;
+    const close = () => {
+      setContextMenu(prev => ({ ...prev, visible: false }));
+      setPanelMenu(prev => ({ ...prev, visible: false }));
+    };
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
-  }, [contextMenu.visible]);
+  }, [contextMenu.visible, panelMenu.visible]);
 
   const getCanvasPos = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -838,6 +850,10 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
                 {expandedGroups.has(fid) && chars.map(c => (
                   <button key={c.id}
                     onClick={() => { setSelectedId(c.id); setSelectedMapId(null); setPreviewAnimKey(null); frameRef.current = 0; }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setPanelMenu({ x: e.clientX, y: e.clientY, visible: true, charId: c.id, charName: c.name });
+                    }}
                     className={`w-full text-left pl-7 pr-2 py-1 text-[11px] flex items-center gap-1.5 ${
                       selectedId === c.id && !selectedMapId
                         ? "bg-red-900/30 border-l-2 border-red-500 text-white"
@@ -1270,6 +1286,47 @@ export default function ToonAdmin({ onBack }: { onBack: () => void }) {
           <button onClick={() => { setSelectedElement(null); setContextMenu(p => ({ ...p, visible: false })); }}
             className="w-full text-left px-3 py-1 hover:bg-white/10 text-white/40">
             Deselect
+          </button>
+        </div>
+      )}
+
+      {/* Panel Right-Click Menu (character list) */}
+      {panelMenu.visible && (
+        <div className="fixed z-[60] min-w-[160px] bg-zinc-900 border border-white/15 rounded-lg shadow-2xl py-1 text-[11px]"
+          style={{ left: Math.min(panelMenu.x, window.innerWidth - 180), top: Math.min(panelMenu.y, window.innerHeight - 200) }}
+          onClick={e => e.stopPropagation()}>
+          <div className="px-3 py-1 text-[9px] text-white/40 uppercase tracking-widest border-b border-white/5 font-bold">
+            {panelMenu.charName}
+          </div>
+          <button onClick={() => { setSelectedId(panelMenu.charId); setSelectedMapId(null); setPreviewAnimKey(null); frameRef.current = 0; setPanelMenu(p => ({ ...p, visible: false })); }}
+            className="w-full text-left px-3 py-1 hover:bg-white/10 text-white/60">
+            Select
+          </button>
+          {overrides[panelMenu.charId] && (
+            <button onClick={() => {
+              pushUndo();
+              deleteCharOverrides(panelMenu.charId);
+              const newOv = { ...overrides };
+              delete newOv[panelMenu.charId];
+              setOverrides(newOv);
+              showToast(`${panelMenu.charName} overrides removed`);
+              setPanelMenu(p => ({ ...p, visible: false }));
+            }}
+              className="w-full text-left px-3 py-1 hover:bg-red-900/30 text-red-400">
+              Remove Overrides
+            </button>
+          )}
+          <button onClick={() => {
+            pushUndo();
+            deleteCharOverrides(panelMenu.charId);
+            const newOv = { ...overrides };
+            delete newOv[panelMenu.charId];
+            setOverrides(newOv);
+            showToast(`${panelMenu.charName} reset to defaults`);
+            setPanelMenu(p => ({ ...p, visible: false }));
+          }}
+            className="w-full text-left px-3 py-1 hover:bg-red-900/30 text-orange-400">
+            Reset to Defaults
           </button>
         </div>
       )}
