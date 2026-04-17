@@ -109,7 +109,67 @@ function GameApp() {
     return <MapAdmin onBack={goHome} />;
   }
 
-  return <GrudgeFighter2D onBack={() => window.location.reload()} />;
+  // Cross-app routing: engine / gdevelop
+  if (route === "engine") {
+    return (
+      <div className="min-h-screen bg-black">
+        <div className="flex items-center gap-3 p-3 bg-slate-900/90 border-b border-white/10">
+          <button onClick={goHome} className="text-white/70 hover:text-white text-sm">← Back to Hub</button>
+          <span className="text-amber-300 font-bold">The Engine — 3D Game</span>
+        </div>
+        <iframe src="https://dungeon-crawler-quest.vercel.app/editor" className="w-full" style={{ height: 'calc(100vh - 48px)', border: 'none' }} title="The Engine" />
+      </div>
+    );
+  }
+
+  if (route === "gdevelop") {
+    return (
+      <div className="min-h-screen bg-black">
+        <div className="flex items-center gap-3 p-3 bg-slate-900/90 border-b border-white/10">
+          <button onClick={goHome} className="text-white/70 hover:text-white text-sm">← Back to Hub</button>
+          <span className="text-amber-300 font-bold">GDevelop Studio</span>
+        </div>
+        <iframe src="https://gdevelop-assistant.vercel.app" className="w-full" style={{ height: 'calc(100vh - 48px)', border: 'none' }} title="GDevelop Studio" />
+      </div>
+    );
+  }
+
+  // Fighter game route
+  if (route === "fighter") {
+    return <GrudgeFighter2D onBack={goHome} />;
+  }
+
+  // Default: Landing Hub with nav cards
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-black text-white flex flex-col items-center justify-center p-6 gap-8">
+      <div className="text-center">
+        <h1 className="text-5xl font-bold text-amber-300 font-serif tracking-wide">Grudge Studio</h1>
+        <p className="text-white/50 mt-2">by Racalvin The Pirate King</p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-4xl w-full">
+        <button onClick={() => { window.location.hash = "fighter"; }} className="group bg-slate-900/80 border border-amber-400/20 rounded-xl p-8 text-center hover:border-amber-400/60 hover:bg-slate-800/80 transition-all">
+          <div className="text-4xl mb-4">⚔️</div>
+          <h2 className="text-xl font-bold text-amber-300 group-hover:text-amber-200">Grudge Smash</h2>
+          <p className="text-sm text-white/50 mt-2">2D sprite fighting • 10 fighters + assists • Online PvP</p>
+        </button>
+        <button onClick={() => { window.location.hash = "engine"; }} className="group bg-slate-900/80 border border-emerald-400/20 rounded-xl p-8 text-center hover:border-emerald-400/60 hover:bg-slate-800/80 transition-all">
+          <div className="text-4xl mb-4">🎮</div>
+          <h2 className="text-xl font-bold text-emerald-300 group-hover:text-emerald-200">The Engine</h2>
+          <p className="text-sm text-white/50 mt-2">3D BabylonJS • Dungeon Crawler • Map Editor</p>
+        </button>
+        <button onClick={() => { window.location.hash = "gdevelop"; }} className="group bg-slate-900/80 border border-purple-400/20 rounded-xl p-8 text-center hover:border-purple-400/60 hover:bg-slate-800/80 transition-all">
+          <div className="text-4xl mb-4">🛠️</div>
+          <h2 className="text-xl font-bold text-purple-300 group-hover:text-purple-200">GDevelop Studio</h2>
+          <p className="text-sm text-white/50 mt-2">Game launcher • Asset gallery • Services hub</p>
+        </button>
+      </div>
+      <div className="flex gap-4 text-xs text-white/30">
+        <a href="#toonadmin" className="hover:text-white/60">ToonAdmin</a>
+        <a href="#mapadmin" className="hover:text-white/60">MapAdmin</a>
+        <a href="https://grudgewarlords.com" className="hover:text-white/60" target="_blank" rel="noreferrer">grudgewarlords.com</a>
+      </div>
+    </div>
+  );
 }
 
 function App() {

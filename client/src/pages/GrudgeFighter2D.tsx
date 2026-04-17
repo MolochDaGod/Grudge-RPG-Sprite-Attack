@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { ArrowLeft, Crosshair, Shield, Zap, Wifi } from "lucide-react";
 import { usePvP } from "@/hooks/usePvP";
-import { GRUDA_ROSTER, type GrudaCharDef, computeRenderScale, applyOverrides, computeCollisionSizeWithOverrides } from "@/lib/grudaRoster";
+import { GRUDA_ROSTER, type GrudaCharDef, type AssistType, computeRenderScale, applyOverrides, computeCollisionSizeWithOverrides, getMainRoster, getAssistRoster } from "@/lib/grudaRoster";
 import { loadOverridesFromServer, type CharOverrides, type AllOverrides, type ActionOverride } from "@/lib/charConfig";
 import { preloadVfx, getVfxById, getVfxImage, drawVfxFrame, type VfxDef } from "@/lib/vfxLibrary";
 import { getFaction, type FactionId } from "@/lib/factions";
@@ -948,6 +948,9 @@ function AttackFrameCanvas({ src, frames, frameSize, size }: { src: string; fram
 export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     const [p1Pick, setP1Pick] = useState<CharacterDef | null>(null);
     const [p2Pick, setP2Pick] = useState<CharacterDef | null>(null);
+    // MvC-style assists: each player picks up to 2
+    const [p1Assists, setP1Assists] = useState<GrudaCharDef[]>([]);
+    const [p2Assists, setP2Assists] = useState<GrudaCharDef[]>([]);
     const [selectedStage, setSelectedStage] = useState<StageDefinition>(STAGES[0]);
     const [customStages, setCustomStages] = useState<StageDefinition[]>([]);
     const [selectPhase, setSelectPhase] = useState<"mode" | "lobby" | "p1" | "p2" | "stage" | "fight">("mode");
@@ -3450,9 +3453,31 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         );
     }
 
-    // ─── CHARACTER SELECT SCREEN ─────────────────────────────────
+    // ─── CHARACTER SELECT SCREEN (10 Mains + Assist Picker) ─────
     if (selectPhase === "p1" || selectPhase === "p2") {
         const isPvPWaiting = pvp.state === "ready" || pvp.state === "waiting";
+        const mainChars = CHARACTER_ROSTER.filter(c => {
+            const g = GRUDA_ROSTER.find(r => r.id === c.id);
+            return g?.role === 'main';
+        });
+        const assistChars = getAssistRoster();
+        const currentAssists = selectPhase === 'p1' ? p1Assists : p2Assists;
+        const setCurrentAssists = selectPhase === 'p1' ? setP1Assists : setP2Assists;
+
+        const handleAssistToggle = (a: GrudaCharDef) => {
+            setCurrentAssists(prev => {
+                if (prev.find(x => x.id === a.id)) return prev.filter(x => x.id !== a.id);
+                if (prev.length >= 2) return prev;
+                return [...prev, a];
+            });
+        };
+
+        const ASSIST_TYPE_BADGE: Record<AssistType, { label: string; color: string }> = {
+            alpha: { label: 'α Rush', color: '#ef4444' },
+            beta: { label: 'β Range', color: '#3b82f6' },
+            gamma: { label: 'γ Anti-Air', color: '#a855f7' },
+        };
+
         return (
             <div className="min-h-screen bg-slate-950 text-white p-4 md:p-6">
                 <div className="max-w-[1100px] mx-auto space-y-6">
@@ -3479,38 +3504,89 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                         )}
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                        {CHARACTER_ROSTER.map((char) => {
-                            const faction = getFaction(char.faction);
-                            return (
-                            <button
-                                key={char.id}
-                                onClick={() => handleCharacterPick(char)}
-                                className="group relative bg-slate-900/80 border border-white/10 rounded-lg p-4 hover:border-amber-400/60 hover:bg-slate-800/80 transition-all text-left"
-                                style={{ borderColor: `${faction.colorPrimary}33` }}
-                            >
-                                <div className="w-full h-32 flex items-center justify-center mb-3 overflow-hidden bg-black/30 rounded">
-                                    <AttackFrameCanvas
-                                        src={char.sprites.attack.src}
-                                        frames={char.sprites.attack.frames}
-                                        frameSize={GRUDA_ROSTER.find(g => g.id === char.id)?.frameSize ?? 100}
-                                        size={128}
-                                    />
-                                </div>
-                                <div className="text-center">
-                                    <div className="font-semibold text-white group-hover:text-amber-300 transition-colors">{char.name}</div>
-                                    <div className="flex items-center justify-center gap-1.5 mt-1">
-                                        <img src={faction.emblemSrc} alt={faction.name} className="w-4 h-4 object-contain" style={{ filter: 'drop-shadow(0 0 2px rgba(0,0,0,0.8))' }} />
-                                        <span className="text-xs font-medium" style={{ color: faction.colorPrimary }}>{faction.name}</span>
+                    {/* ── 10 Main Fighters (2x5 grid) ── */}
+                    <div>
+                        <h2 className="text-lg font-bold text-amber-200 mb-3">Main Fighters</h2>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                            {mainChars.map((char) => {
+                                const faction = getFaction(char.faction);
+                                return (
+                                <button
+                                    key={char.id}
+                                    onClick={() => handleCharacterPick(char)}
+                                    className="group relative bg-slate-900/80 border border-white/10 rounded-lg p-4 hover:border-amber-400/60 hover:bg-slate-800/80 transition-all text-left"
+                                    style={{ borderColor: `${faction.colorPrimary}33` }}
+                                >
+                                    <div className="w-full h-32 flex items-center justify-center mb-3 overflow-hidden bg-black/30 rounded">
+                                        <AttackFrameCanvas
+                                            src={char.sprites.attack.src}
+                                            frames={char.sprites.attack.frames}
+                                            frameSize={GRUDA_ROSTER.find(g => g.id === char.id)?.frameSize ?? 128}
+                                            size={128}
+                                        />
                                     </div>
-                                    <div className="text-xs text-white/50 mt-0.5">
-                                        ATK {char.moveSet.baseDamage} · SPD {char.moveSet.runSpeed.toFixed(1)}
+                                    <div className="text-center">
+                                        <div className="font-semibold text-white group-hover:text-amber-300 transition-colors">{char.name}</div>
+                                        <div className="flex items-center justify-center gap-1.5 mt-1">
+                                            <img src={faction.emblemSrc} alt={faction.name} className="w-4 h-4 object-contain" style={{ filter: 'drop-shadow(0 0 2px rgba(0,0,0,0.8))' }} />
+                                            <span className="text-xs font-medium" style={{ color: faction.colorPrimary }}>{faction.name}</span>
+                                        </div>
+                                        <div className="text-xs text-white/50 mt-0.5">
+                                            ATK {char.moveSet.baseDamage} · SPD {char.moveSet.runSpeed.toFixed(1)}
+                                        </div>
                                     </div>
-                                </div>
-                                <div className="absolute top-2 right-2 w-3 h-3 rounded-full" style={{ backgroundColor: char.color }} />
-                            </button>
-                            );
-                        })}
+                                    <div className="absolute top-2 right-2 w-3 h-3 rounded-full" style={{ backgroundColor: char.color }} />
+                                </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* ── Assist Picks (scrollable row) ── */}
+                    <div>
+                        <div className="flex items-center justify-between mb-3">
+                            <h2 className="text-lg font-bold text-purple-200">Assist Heroes <span className="text-sm font-normal text-white/40">(pick up to 2 — L/K to call in)</span></h2>
+                            <div className="flex gap-2">
+                                {currentAssists.map(a => (
+                                    <Badge key={a.id} className="bg-purple-500/30 text-purple-200 border-purple-400/30">
+                                        {a.name} · {a.assist?.assistType ?? 'α'}
+                                    </Badge>
+                                ))}
+                                {currentAssists.length === 0 && <span className="text-xs text-white/30">None selected</span>}
+                            </div>
+                        </div>
+                        <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-track-slate-900 scrollbar-thumb-slate-700">
+                            {assistChars.map(a => {
+                                const isSelected = currentAssists.some(x => x.id === a.id);
+                                const faction = getFaction(a.faction);
+                                const badge = a.assist ? ASSIST_TYPE_BADGE[a.assist.assistType] : ASSIST_TYPE_BADGE.alpha;
+                                return (
+                                    <button
+                                        key={a.id}
+                                        onClick={() => handleAssistToggle(a)}
+                                        className={`flex-shrink-0 w-[110px] rounded-lg border p-2 text-center transition-all ${
+                                            isSelected
+                                                ? 'border-purple-400 bg-purple-900/40 ring-1 ring-purple-400/50'
+                                                : 'border-white/10 bg-slate-900/60 hover:border-purple-400/40'
+                                        }`}
+                                    >
+                                        <div className="w-16 h-16 mx-auto mb-1 overflow-hidden bg-black/30 rounded">
+                                            <AttackFrameCanvas
+                                                src={`/fighter2d/characters/${a.folder}/${a.attack[0]}`}
+                                                frames={a.attack[1]}
+                                                frameSize={a.frameSize}
+                                                size={64}
+                                            />
+                                        </div>
+                                        <div className="text-xs font-semibold text-white/90 truncate">{a.name}</div>
+                                        <div className="text-[10px] mt-0.5 rounded px-1 py-0.5 inline-block" style={{ backgroundColor: badge.color + '33', color: badge.color }}>
+                                            {badge.label}
+                                        </div>
+                                        {isSelected && <div className="absolute top-1 right-1 w-2 h-2 bg-purple-400 rounded-full" />}
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
                 </div>
             </div>
