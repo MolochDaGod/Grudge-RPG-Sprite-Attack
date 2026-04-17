@@ -20,8 +20,10 @@ export interface CharacterIdentity {
   displayName: string;
 }
 
-// 10 Main Fighters — canonical cross-app identity
+// 11 Main Fighters — canonical cross-app identity
 export const CHARACTER_IDENTITY_MAP: CharacterIdentity[] = [
+  // Racalvin The Pirate King — creator's character, always first
+  { grudgeId: 'GRD-RACALVIN-00',   smashId: 'racalvin',          warlordRace: 'human',     warlordClass: 'ranger',  engineModelId: 'WK_PirateKing', faction: 'crusade', displayName: 'Racalvin The Pirate King' },
   // Hustle 5
   { grudgeId: 'GRD-KNIGHT-01',     smashId: 'hustle-knight',     warlordRace: 'human',     warlordClass: 'warrior', engineModelId: 'WK_Knight',     faction: 'crusade', displayName: 'Knight' },
   { grudgeId: 'GRD-MAGE-01',       smashId: 'hustle-mage',       warlordRace: 'elf',       warlordClass: 'mage',    engineModelId: 'ELF_Mage',      faction: 'fabled',  displayName: 'Mage' },

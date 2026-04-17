@@ -141,8 +141,24 @@ export function getAssistRoster(): GrudaCharDef[] {
 
 export const GRUDA_ROSTER: GrudaCharDef[] = [
   // ══════════════════════════════════════════════════════════════
-  // 10 MAIN FIGHTERS (5 Hustle + 5 Grudge originals)
+  // 11 MAIN FIGHTERS (Racalvin + 5 Hustle + 5 Grudge originals)
   // ══════════════════════════════════════════════════════════════
+
+  // ─── RACALVIN THE PIRATE KING (creator's character) ─────────
+  // 12 sprite sheets: Idle(4f), Walk(6f), Attack1-4(6f each), Attack5_1/2/3(4f each), Special(6f), Hurt(2f), Death(6f)
+  // Q = cutlass slash (Attack1), E = pistol shot (Attack2), up+Q = heavy swing (Attack3),
+  // down+Q = combo finisher (Attack4), Special = triple cannon barrage (Attack5_1→5_2→5_3),
+  // F = ranged pistol shot (bullet.png projectile), R = Cannon Barrage super
+  { id:"racalvin", name:"Racalvin", folder:"pirate-captain", color:"#d4af37", faction:"crusade", role:"main", frameSize:96,
+    idle:["Idle.png",4], walk:["Walk.png",6],
+    attack:["Attack1.png",6],   // Q — cutlass slash
+    attack2:["Attack2.png",6],  // E — pistol shot melee
+    special:["Special.png",6],  // up+Q/E — pirate special
+    cast:["Attack3.png",6],     // mapped to down special — heavy swing
+    block:["Attack4.png",6],    // mapped to counter stance — combo finisher
+    hurt:["Hurt.png",2], death:["Death.png",6],
+    projectile:"bullet.png",
+    atk:14, spd:6.2, superDmg:45, superName:"Cannon Barrage" },
 
   // ─── HUSTLE 5 (128x128 frame sheets) ─────────────────────────
   { id:"hustle-knight", name:"Knight", folder:"hustle-knight", color:"#e74c3c", faction:"crusade", role:"main", frameSize:128, hustleSprite:true,
@@ -285,12 +301,7 @@ export const GRUDA_ROSTER: GrudaCharDef[] = [
     fall:["Fall.png",3], attack2:["Attack2.png",7],
     assist:{ assistType:"gamma", assistAnimation:"attack", cooldown:5, damage:16 },
     atk:14, spd:6.0, superDmg:36, superName:"Silver Crescendo" },
-  { id:"pirate-captain", name:"Pirate Captain", folder:"pirate-captain", color:"#784212", faction:"crusade", role:"assist", frameSize:96,
-    idle:["Idle.png",4], walk:["Walk.png",6], attack:["Attack1.png",6],
-    hurt:["Hurt.png",2], death:["Death.png",6], special:["Special.png",6], attack2:["Attack2.png",6],
-    projectile:"bullet.png",
-    assist:{ assistType:"beta", assistAnimation:"attack", cooldown:5, damage:15 },
-    atk:13, spd:5.8, superDmg:35, superName:"Cannon Barrage" },
+  // pirate-captain is now Racalvin (main) — removed from assists
   { id:"crossbowman", name:"Crossbowman", folder:"crossbowman", color:"#566573", faction:"crusade", role:"assist", frameSize:96,
     idle:["Idle.png",6], walk:["Walk.png",8], attack:["Attack_1.png",4],
     hurt:["Hurt.png",3], death:["Dead.png",4], jump:["Jump.png",10],
