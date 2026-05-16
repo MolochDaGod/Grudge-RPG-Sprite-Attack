@@ -55,7 +55,8 @@ export async function syncFighterSelection(smashId: string): Promise<void> {
   const grudgeId = getGrudgeId(smashId);
   if (!grudgeId) return;
   try {
-    await fetch('https://api.grudge-studio.com/v1/player/fighter', {
+    const apiBase = (import.meta as any).env?.VITE_GRUDGE_GAME_API || 'https://api.grudge-studio.com';
+    await fetch(`${apiBase}/v1/player/fighter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ grudgeId, smashId, app: 'grudge-smash' }),

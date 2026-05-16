@@ -12,7 +12,6 @@ import {
 import { randomUUID } from "crypto";
 import * as meshyService from "./meshyService";
 import { parseAsepriteFile, getAllAsepriteData } from "./asepriteParser";
-import { registerChatRoutes } from "./replit_integrations/chat";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -1349,14 +1348,6 @@ public class TethicalSprites : MonoBehaviour {
     const { version } = readVersioned();
     res.json({ success: true, version });
   });
-
-  // ========== AI CHAT ROUTES ==========
-  // Chat requires DATABASE_URL — skip if not configured (PvP-only mode)
-  if (process.env.DATABASE_URL) {
-    registerChatRoutes(app);
-  } else {
-    console.log("[routes] DATABASE_URL not set — chat routes disabled (PvP-only mode)");
-  }
 
   return httpServer;
 }

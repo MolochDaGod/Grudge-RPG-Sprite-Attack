@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
-
-// Grudge PvP server — Coolify VPS deployment, configurable via env
-const PVP_SERVER_URL = import.meta.env.VITE_PVP_SERVER_URL || "https://pvp.grudge-studio.com";
+import { PVP_SERVER_URL } from "@/lib/apiConfig";
 
 export type PvPState = "disconnected" | "connected" | "in-room" | "waiting" | "ready" | "fighting" | "opponent-left";
 

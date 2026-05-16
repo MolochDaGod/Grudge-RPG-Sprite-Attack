@@ -1,8 +1,10 @@
 // Character configuration overrides — shared between ToonAdmin and the fighter game
 // Saves to server first, falls back to localStorage when offline
 
+import { API_BASE as _API_HOST } from './apiConfig';
+
 const STORAGE_KEY = "grudge-char-overrides";
-const API_BASE = "/api/char-config";
+const CHAR_CONFIG_API = `${_API_HOST}/api/char-config`;
 
 // Game action slots that can be remapped to different animation files
 export const ACTION_SLOTS = [
@@ -98,7 +100,7 @@ export function saveOverrides(overrides: AllOverrides): void {
 /** Load overrides from server, merge with local, return combined */
 export async function loadOverridesFromServer(): Promise<AllOverrides> {
   try {
-    const res = await fetch(API_BASE);
+    const res = await fetch(CHAR_CONFIG_API);
     if (res.ok) {
       const server = await res.json();
       // Merge: server takes priority, local fills gaps
@@ -115,7 +117,7 @@ export async function loadOverridesFromServer(): Promise<AllOverrides> {
 export async function saveOverridesToServer(overrides: AllOverrides): Promise<boolean> {
   saveOverrides(overrides);
   try {
-    const res = await fetch(API_BASE, {
+    const res = await fetch(CHAR_CONFIG_API, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(overrides),
@@ -136,7 +138,7 @@ export function setCharOverrides(charId: string, overrides: CharOverrides): void
   all[charId] = overrides;
   saveOverrides(all);
   // Fire-and-forget server sync
-  fetch(`${API_BASE}/${charId}`, {
+  fetch(`${CHAR_CONFIG_API}/${charId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(overrides),
@@ -147,7 +149,7 @@ export function deleteCharOverrides(charId: string): void {
   const all = loadOverrides();
   delete all[charId];
   saveOverrides(all);
-  fetch(`${API_BASE}/${charId}`, { method: "DELETE" }).catch(() => {});
+  fetch(`${CHAR_CONFIG_API}/${charId}`, { method: "DELETE" }).catch(() => {});
 }
 
 export function exportAllOverrides(): string {

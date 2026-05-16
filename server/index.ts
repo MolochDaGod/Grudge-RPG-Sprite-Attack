@@ -1,21 +1,33 @@
 import express, { type Request, Response, NextFunction } from "express";
+import cors from "cors";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import path from "path";
+import { hasDb } from "./db";
 
 const app = express();
 const httpServer = createServer(app);
 
-// CORS middleware for Sprite API - enables external game integration
-app.use('/api/sprites', (req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
+// ── Global CORS for all /api routes ──────────────────────────────
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:5000').split(',').map(s => s.trim());
+app.use('/api', cors({
+  origin: (origin, cb) => {
+    // Allow requests with no origin (curl, server-to-server) and listed origins
+    if (!origin || CORS_ORIGINS.includes('*') || CORS_ORIGINS.includes(origin)) {
+      cb(null, true);
+    } else {
+      cb(null, false);
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-token', 'x-config-version'],
+}));
+
+// ── Health check (Railway / Coolify) ─────────────────────────────
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', pvp: true, db: hasDb, ts: Date.now() });
 });
 
 // Serve attached_assets statically for GLB models and other assets
@@ -25,15 +37,7 @@ app.use('/attached_assets', express.static(path.resolve(import.meta.dirname, '..
 app.use('/sprites', express.static(path.resolve(import.meta.dirname, '..', 'dist', 'sprites')));
 
 // Serve entire dist folder (API, docs, sprites) with CORS for external access
-app.use('/dist', (req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-}, express.static(path.resolve(import.meta.dirname, '..', 'dist')));
+app.use('/dist', cors(), express.static(path.resolve(import.meta.dirname, '..', 'dist')));
 
 declare module "http" {
   interface IncomingMessage {

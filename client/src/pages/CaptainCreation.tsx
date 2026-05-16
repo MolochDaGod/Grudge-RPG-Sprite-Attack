@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Anchor, Sword, Sparkles, Shield } from "lucide-react";
+import { API_BASE } from "@/lib/apiConfig";
 
 import humanImg from "@/assets/races/human.png";
 import orcImg from "@/assets/races/orc.png";
@@ -110,7 +111,7 @@ export default function CaptainCreation({ onBack, onCaptainCreated }: CaptainCre
     setIsGenerating(true);
 
     try {
-      const response = await fetch("/api/meshy/generate-custom-character", {
+      const response = await fetch(`${API_BASE}/api/meshy/generate-custom-character`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

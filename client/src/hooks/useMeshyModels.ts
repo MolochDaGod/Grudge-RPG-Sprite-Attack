@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { API_BASE } from '@/lib/apiConfig';
 
 interface MeshyTask {
   id: string;
@@ -40,7 +41,7 @@ export function useMeshyModels() {
 
   const checkMeshyStatus = useCallback(async () => {
     try {
-      const response = await fetch('/api/meshy/status');
+      const response = await fetch(`${API_BASE}/api/meshy/status`);
       const data: MeshyStatus = await response.json();
       setIsConfigured(data.configured);
     } catch {
@@ -50,7 +51,7 @@ export function useMeshyModels() {
 
   const pollTask = useCallback(async (taskId: string) => {
     try {
-      const response = await fetch(`/api/meshy/task/${taskId}`);
+      const response = await fetch(`${API_BASE}/api/meshy/task/${taskId}`);
       const task: MeshyTask = await response.json();
       setCurrentTask(task);
 
@@ -96,7 +97,7 @@ export function useMeshyModels() {
     setCurrentTask(null);
 
     try {
-      const response = await fetch('/api/meshy/generate', {
+      const response = await fetch(`${API_BASE}/api/meshy/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(options),
@@ -127,7 +128,7 @@ export function useMeshyModels() {
     setCurrentTask(null);
 
     try {
-      const response = await fetch('/api/meshy/generate-ship', {
+      const response = await fetch(`${API_BASE}/api/meshy/generate-ship`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ shipType }),
@@ -158,7 +159,7 @@ export function useMeshyModels() {
     setCurrentTask(null);
 
     try {
-      const response = await fetch('/api/meshy/generate-sail', {
+      const response = await fetch(`${API_BASE}/api/meshy/generate-sail`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -183,7 +184,7 @@ export function useMeshyModels() {
     setError(null);
 
     try {
-      const response = await fetch(`/api/meshy/refine/${previewTaskId}`, {
+      const response = await fetch(`${API_BASE}/api/meshy/refine/${previewTaskId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -233,7 +234,7 @@ export function useShipTypes() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/meshy/ship-types')
+    fetch(`${API_BASE}/api/meshy/ship-types`)
       .then(res => res.json())
       .then(data => {
         setShipTypes(data.shipTypes || []);
