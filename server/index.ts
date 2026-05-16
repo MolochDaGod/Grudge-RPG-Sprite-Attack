@@ -1,5 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import cors from "cors";
+import helmet from "helmet";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -8,6 +9,39 @@ import { hasDb } from "./db";
 
 const app = express();
 const httpServer = createServer(app);
+
+// ── Security headers (helmet) ────────────────────────────────────
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://js.puter.com", "https://fonts.googleapis.com"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+      imgSrc: ["'self'", "data:", "blob:", "https:", "http:"],
+      mediaSrc: ["'self'", "blob:", "data:"],
+      connectSrc: [
+        "'self'",
+        "https://*.grudge-studio.com",
+        "https://api.grudge-studio.com",
+        "https://js.puter.com",
+        "https://puter.com",
+        "wss://*.grudge-studio.com",
+        "ws://localhost:*",
+        "http://localhost:*",
+      ],
+      frameSrc: ["'self'", "https://dungeon-crawler-quest.vercel.app", "https://gdevelop-assistant.vercel.app", "https://js.puter.com"],
+      workerSrc: ["'self'", "blob:"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'self'"],
+      upgradeInsecureRequests: [],
+    },
+  },
+  crossOriginEmbedderPolicy: false,   // allow loading cross-origin sprites/assets
+  crossOriginResourcePolicy: { policy: "cross-origin" }, // allow sprites served to other games
+}));
 
 // ── Global CORS for all /api routes ──────────────────────────────
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:5000').split(',').map(s => s.trim());

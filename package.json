@@ -123,6 +123,7 @@
     "gltfjsx": "^6.5.3",
     "gltfpack": "^1.0.0",
     "havok-n": "^0.0.0",
+    "helmet": "^8.1.0",
     "howler": "^2.2.4",
     "ice-hail": "^3.5.0",
     "input-otp": "^1.4.2",
