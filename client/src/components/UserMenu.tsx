@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { usePuterAuth } from "@/contexts/PuterAuthContext";
+import { grudgeSignOut } from "@/lib/grudgeAuth";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,11 +16,10 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { 
-  User, LogIn, LogOut, Save, FolderOpen, Trash2, 
-  Settings, Loader2, Cloud, CloudOff 
+  User, LogOut, Save, FolderOpen, Trash2, 
+  Loader2, Cloud
 } from "lucide-react";
 import type { SaveGameData } from "@/lib/puterAuth";
 
@@ -29,13 +28,9 @@ interface UserMenuProps {
 }
 
 export function UserMenu({ onLoadSave }: UserMenuProps) {
+  const grudgeUsername = localStorage.getItem('grudge_username') || 'Player';
   const { 
-    user, 
-    isLoading, 
-    isAvailable, 
     currentSave,
-    signIn, 
-    signOut, 
     saveCurrentGame,
     listSaves,
     loadSave,
@@ -45,12 +40,6 @@ export function UserMenu({ onLoadSave }: UserMenuProps) {
   const [saves, setSaves] = useState<{ key: string; data: SaveGameData }[]>([]);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [showSavesDialog, setShowSavesDialog] = useState(false);
-
-  const handleSignIn = async () => {
-    setLoadingAction("signin");
-    await signIn();
-    setLoadingAction(null);
-  };
 
   const handleSave = async () => {
     if (!currentSave) return;
@@ -86,58 +75,19 @@ export function UserMenu({ onLoadSave }: UserMenuProps) {
     setLoadingAction(null);
   };
 
-  if (!isAvailable) {
-    return (
-      <div className="flex items-center gap-2 text-muted-foreground text-sm">
-        <CloudOff className="w-4 h-4" />
-        <span>Cloud unavailable</span>
-      </div>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center gap-2 text-muted-foreground">
-        <Loader2 className="w-4 h-4 animate-spin" />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <Button 
-        variant="outline" 
-        size="sm" 
-        onClick={handleSignIn}
-        disabled={loadingAction === "signin"}
-        data-testid="button-signin"
-      >
-        {loadingAction === "signin" ? (
-          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-        ) : (
-          <LogIn className="w-4 h-4 mr-2" />
-        )}
-        Sign In with Puter
-      </Button>
-    );
-  }
-
   return (
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="sm" className="gap-2" data-testid="button-usermenu">
             <Cloud className="w-4 h-4 text-green-500" />
-            <span className="max-w-[100px] truncate">{user.username}</span>
-            {user.is_temp && (
-              <Badge variant="secondary" className="text-xs">Temp</Badge>
-            )}
+            <span className="max-w-[100px] truncate">{grudgeUsername}</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
           <DropdownMenuLabel className="flex items-center gap-2">
             <User className="w-4 h-4" />
-            {user.username}
+            {grudgeUsername}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           
@@ -171,7 +121,7 @@ export function UserMenu({ onLoadSave }: UserMenuProps) {
           
           <DropdownMenuSeparator />
           
-          <DropdownMenuItem onClick={signOut} data-testid="menuitem-signout">
+          <DropdownMenuItem onClick={grudgeSignOut} data-testid="menuitem-signout">
             <LogOut className="w-4 h-4 mr-2" />
             Sign Out
           </DropdownMenuItem>

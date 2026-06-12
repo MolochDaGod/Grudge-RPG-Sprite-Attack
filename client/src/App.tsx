@@ -5,29 +5,13 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { PuterAuthProvider } from "@/contexts/PuterAuthContext";
+import { consumeGrudgeAuth, requireGrudgeAuth, isGrudgeAuthed } from "@/lib/grudgeAuth";
 import GrudgeFighter2D from "@/pages/GrudgeFighter2D";
 import ToonAdmin from "@/pages/ToonAdmin";
 import MapAdmin from "@/pages/MapAdmin";
 
-// ── Grudge Unified Auth ──
-const GRUDGE_AUTH_URL = 'https://id.grudge-studio.com/auth';
-(function consumeGrudgeAuth() {
-  if (!location.hash || !location.hash.includes('token=')) return;
-  const hash = new URLSearchParams(location.hash.slice(1));
-  const token = hash.get('token');
-  if (!token) return;
-  localStorage.setItem('grudge_auth_token', token);
-  if (hash.get('grudgeId')) localStorage.setItem('grudge_id', hash.get('grudgeId')!);
-  if (hash.get('name')) localStorage.setItem('grudge_username', hash.get('name')!);
-  window.history.replaceState(null, '', location.pathname + location.search);
-})();
-
-export function requireGrudgeAuth() {
-  if (localStorage.getItem('grudge_auth_token')) return true;
-  const redirect = encodeURIComponent(window.location.href);
-  window.location.href = `${GRUDGE_AUTH_URL}?redirect=${redirect}&app=rpg-sprite-attack`;
-  return false;
-}
+// Consume auth callback params on initial page load
+consumeGrudgeAuth();
 function StartupIntro({ onComplete }: { onComplete: () => void }) {
   const [showSkip, setShowSkip] = useState(false);
 
@@ -72,12 +56,18 @@ function getActiveRoute(): string {
 }
 
 function GameApp() {
+  const [authed] = useState(isGrudgeAuthed);
   const [route, setRoute] = useState(getActiveRoute);
   const [showStartupIntro, setShowStartupIntro] = useState(() => {
     // Skip intro entirely when navigating directly to admin pages
     const r = getActiveRoute();
     return r !== "toonadmin" && r !== "mapadmin";
   });
+
+  // Gate the entire app behind Grudge auth
+  useEffect(() => {
+    if (!authed) requireGrudgeAuth();
+  }, [authed]);
 
   useEffect(() => {
     const update = () => setRoute(getActiveRoute());
@@ -88,6 +78,14 @@ function GameApp() {
       window.removeEventListener("popstate", update);
     };
   }, []);
+
+  if (!authed) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-amber-300 animate-pulse text-lg">Redirecting to login…</div>
+      </div>
+    );
+  }
 
   if (showStartupIntro) {
     return <StartupIntro onComplete={() => setShowStartupIntro(false)} />;
