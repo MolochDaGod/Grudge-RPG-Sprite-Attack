@@ -2,38 +2,38 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
-const RAILWAY_API =
-  process.env.VITE_GAME_DATA_API ||
-  process.env.VITE_GRUDGE_API_URL ||
-  "https://grudge-builder-production.up.railway.app";
+const DEFAULT_GAME_DATA_API = "https://grudge-api-production-0d46.up.railway.app";
 
 export default defineConfig(({ mode }) => {
-  loadEnv(mode, path.resolve(import.meta.dirname), "");
+  const env = loadEnv(mode, path.resolve(import.meta.dirname), "");
+  const gameDataApi =
+    env.VITE_GAME_DATA_API || env.GRUDGE_GAME_DATA_API || DEFAULT_GAME_DATA_API;
+
   return {
-  plugins: [
-    react(),
-  ],
-  resolve: {
-    alias: {
-      "@": path.resolve(import.meta.dirname, "client", "src"),
-      "@shared": path.resolve(import.meta.dirname, "shared"),
+    plugins: [react()],
+    resolve: {
+      alias: {
+        "@": path.resolve(import.meta.dirname, "client", "src"),
+        "@shared": path.resolve(import.meta.dirname, "shared"),
+      },
     },
-  },
-  root: path.resolve(import.meta.dirname, "client"),
-  build: {
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
-    emptyOutDir: true,
-  },
-  server: {
-    fs: {
-      strict: true,
-      deny: ["**/.*"],
+    root: path.resolve(import.meta.dirname, "client"),
+    build: {
+      outDir: path.resolve(import.meta.dirname, "dist/public"),
+      emptyOutDir: true,
     },
-    proxy: {
-      "/api/auth": { target: RAILWAY_API, changeOrigin: true, secure: true },
-      "/api/account": { target: RAILWAY_API, changeOrigin: true, secure: true },
-      "/api/characters": { target: RAILWAY_API, changeOrigin: true, secure: true },
+    server: {
+      fs: {
+        strict: true,
+        deny: ["**/.*"],
+      },
+      proxy: {
+        "/api/auth": { target: gameDataApi, changeOrigin: true, secure: true },
+        "/api/account": { target: gameDataApi, changeOrigin: true, secure: true },
+        "/api/characters": { target: gameDataApi, changeOrigin: true, secure: true },
+        "/api/wallet": { target: gameDataApi, changeOrigin: true, secure: true },
+        "/api/treaty": { target: gameDataApi, changeOrigin: true, secure: true },
+      },
     },
-  },
-};
+  };
 });

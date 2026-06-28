@@ -1,23 +1,18 @@
 /**
- * Grudge Studio service URLs — single source of truth for Sprite Attack.
+ * Grudge auth + API config — imports fleet production URLs.
  */
-const env = (import.meta as any).env ?? {};
+import {
+  GRUDGE_AUTH_GATEWAY,
+  GRUDGE_GAME_DATA_API,
+  GRUDGE_APP_ORIGIN,
+} from "./fleetConfig";
 
-export const AUTH_GATEWAY: string =
-  env.VITE_AUTH_GATEWAY_URL || "https://id.grudge-studio.com";
-
-/** Railway game-data API (accounts, characters, wallet). Proxied via /api in production. */
-export const GAME_DATA_API: string =
-  env.VITE_GAME_DATA_API ||
-  env.VITE_GRUDGE_API_URL ||
-  "https://grudge-builder-production.up.railway.app";
-
+export const AUTH_GATEWAY = GRUDGE_AUTH_GATEWAY;
+export const GAME_DATA_API = GRUDGE_GAME_DATA_API;
 export const API_BASE = "/api";
 
 export function buildSsoLoginUrl(returnOrigin?: string): string {
-  const origin =
-    returnOrigin ||
-    (typeof window !== "undefined" ? window.location.origin : "https://grudge-rpg-sprite-attack.vercel.app");
+  const origin = returnOrigin || GRUDGE_APP_ORIGIN;
   const redirectUri = `${origin}/auth/callback`;
   return `${AUTH_GATEWAY}/login?redirect_uri=${encodeURIComponent(redirectUri)}`;
 }

@@ -12,6 +12,7 @@ import GrudgeFighter2D from "@/pages/GrudgeFighter2D";
 import ToonAdmin from "@/pages/ToonAdmin";
 import MapAdmin from "@/pages/MapAdmin";
 import AuthCallbackPage from "@/pages/AuthCallback";
+import { FLEET_EMBEDS } from "@/lib/fleetConfig";
 
 consumeGrudgeAuth();
 
@@ -123,7 +124,7 @@ function GameApp() {
           <button onClick={goHome} className="text-white/70 hover:text-white text-sm">← Back to Hub</button>
           <span className="text-amber-300 font-bold">The Engine — 3D Game</span>
         </div>
-        <iframe src="https://dungeon-crawler-quest.vercel.app/editor" className="w-full" style={{ height: "calc(100vh - 48px)", border: "none" }} title="The Engine" />
+        <iframe src={FLEET_EMBEDS.engine} className="w-full" style={{ height: "calc(100vh - 48px)", border: "none" }} title="The Engine" />
       </div>
     );
   }
@@ -135,7 +136,7 @@ function GameApp() {
           <button onClick={goHome} className="text-white/70 hover:text-white text-sm">← Back to Hub</button>
           <span className="text-amber-300 font-bold">GDevelop Studio</span>
         </div>
-        <iframe src="https://gdevelop-assistant.vercel.app" className="w-full" style={{ height: "calc(100vh - 48px)", border: "none" }} title="GDevelop Studio" />
+        <iframe src={FLEET_EMBEDS.gdevelop} className="w-full" style={{ height: "calc(100vh - 48px)", border: "none" }} title="GDevelop Studio" />
       </div>
     );
   }
@@ -170,7 +171,7 @@ function GameApp() {
       <div className="flex gap-4 text-xs text-white/30">
         <a href="#toonadmin" className="hover:text-white/60">ToonAdmin</a>
         <a href="#mapadmin" className="hover:text-white/60">MapAdmin</a>
-        <a href="https://grudgewarlords.com" className="hover:text-white/60" target="_blank" rel="noreferrer">grudgewarlords.com</a>
+        <a href={FLEET_EMBEDS.warlords} className="hover:text-white/60" target="_blank" rel="noreferrer">grudgewarlords.com</a>
       </div>
     </div>
   );

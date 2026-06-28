@@ -1,18 +1,17 @@
 /**
- * Proxy Grudge account/auth API to Railway (GrudgeBuilder Postgres).
- * Local /api/accounts (plural) remains on this server for legacy sprite-attack data.
+ * Proxy Grudge account/auth API to production game-data backend.
  */
-import type { Express, Request, Response } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 
 const GRUDGE_DATA_API =
   process.env.GRUDGE_GAME_DATA_API ||
   process.env.VITE_GAME_DATA_API ||
-  "https://grudge-builder-production.up.railway.app";
+  "https://grudge-api-production-0d46.up.railway.app";
 
-const PROXY_PREFIXES = ["/api/auth", "/api/account", "/api/characters"];
+const PROXY_PREFIXES = ["/api/auth", "/api/account", "/api/characters", "/api/wallet", "/api/treaty"];
 
 export function registerGrudgeBackendProxy(app: Express): void {
-  app.use(async (req: Request, res: Response, next) => {
+  app.use(async (req: Request, res: Response, next: NextFunction) => {
     const path = req.path;
     if (!PROXY_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`))) {
       return next();
@@ -45,5 +44,5 @@ export function registerGrudgeBackendProxy(app: Express): void {
     }
   });
 
-  console.log(`[grudge-proxy] /api/{auth,account,characters} → ${GRUDGE_DATA_API}`);
+  console.log(`[grudge-proxy] /api/{auth,account,characters,wallet,treaty} → ${GRUDGE_DATA_API}`);
 }

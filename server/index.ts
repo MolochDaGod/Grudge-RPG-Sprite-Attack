@@ -31,7 +31,7 @@ app.use(helmet({
         "ws://localhost:*",
         "http://localhost:*",
       ],
-      frameSrc: ["'self'", "https://dungeon-crawler-quest.vercel.app", "https://gdevelop-assistant.vercel.app", "https://js.puter.com"],
+      frameSrc: ["'self'", "https://*.grudge-studio.com", "https://js.puter.com"],
       workerSrc: ["'self'", "blob:"],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
@@ -45,7 +45,13 @@ app.use(helmet({
 }));
 
 // ── Global CORS for all /api routes ──────────────────────────────
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:5000,https://grudge-rpg-sprite-attack.vercel.app,https://grudge-rpg-sprite-attack-grudgenexus.vercel.app,https://molochdagod.github.io').split(',').map(s => s.trim());
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || [
+  'http://localhost:5000',
+  'https://rpg.grudge-studio.com',
+  'https://grudge-rpg-sprite-attack-grudgenexus.vercel.app',
+  'https://id.grudge-studio.com',
+  'https://grudgewarlords.com',
+].join(',')).split(',').map(s => s.trim());
 app.use('/api', cors({
   origin: (origin, cb) => {
     // Allow requests with no origin (curl, server-to-server) and listed origins
