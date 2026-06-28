@@ -12,6 +12,7 @@ import { playSound, preloadSounds as preloadGameSounds } from "@/lib/gameSounds"
 import { getDefaultVfx } from "@/lib/defaultVfx";
 import { DEFAULT_TILE_CONFIG, STAGE_PAD_SPRITES, getAssetById } from "@/lib/mapAssets";
 import { type PlacedAsset, listMaps, loadMap, mapToStage } from "@/lib/mapStorage";
+import { syncFighterSelection, loadSavedFighterPick } from "@/lib/characterIdentity";
 
 type FighterId = "p1" | "p2";
 type AnimationState = "idle" | "run" | "jump" | "fall" | "attack" | "attack2" | "special" | "takeHit" | "death" | "dodge";
@@ -1009,9 +1010,17 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         }
     }, [pvp.state, pvp.fightData]);
 
+    useEffect(() => {
+        const saved = loadSavedFighterPick();
+        if (!saved || p1Pick) return;
+        const char = CHARACTER_ROSTER.find((c) => c.id === saved);
+        if (char && selectPhase === "p1") setP1Pick(char);
+    }, [p1Pick, selectPhase]);
+
     const handleCharacterPick = useCallback((char: CharacterDef) => {
         if (selectPhase === "p1") {
             setP1Pick(char);
+            syncFighterSelection(char.id);
             if (pvp.state === "waiting" || pvp.state === "in-room") {
                 pvp.pickCharacter(char.id);
                 pvp.setReady();

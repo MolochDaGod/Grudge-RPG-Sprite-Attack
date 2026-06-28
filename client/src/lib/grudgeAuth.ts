@@ -1,67 +1,67 @@
-// ── Grudge Unified Auth ──
-// Centralised auth helpers for id.grudge-studio.com
+/**
+ * Grudge unified auth — id.grudge-studio.com SSO for Sprite Attack.
+ */
+import { buildSsoLoginUrl, purgeGrudgeClientState } from "./grudgeConfig";
+import {
+  isAuthenticated,
+  pickupSsoFromUrl,
+  bridgeGrudgeLaunchToken,
+  clearToken,
+} from "./grudgeBackend";
 
-const GRUDGE_AUTH_URL = 'https://id.grudge-studio.com/auth';
-const GRUDGE_APP_ORIGIN = 'https://grudge-rpg-sprite-attack.vercel.app';
+const DEFAULT_POST_LOGIN_ROUTE = "fighter";
 
 /**
- * Runs once on page load (IIFE in App.tsx) to consume the auth callback
- * params and stash the token in localStorage.
+ * Runs once on page load to consume auth callback params.
  */
-export function consumeGrudgeAuth() {
-  // Try query params first (preferred callback format)
-  const qp = new URLSearchParams(window.location.search);
-  let token = qp.get('token');
-  let grudgeId = qp.get('grudgeId');
-  let name = qp.get('name');
-
-  // Fallback: token in hash (backwards compat)
-  if (!token && location.hash && location.hash.includes('token=')) {
-    const hp = new URLSearchParams(location.hash.slice(1));
-    token = hp.get('token');
-    grudgeId = hp.get('grudgeId');
-    name = hp.get('name');
+export function consumeGrudgeAuth(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  const launchToken = params.get("grudge_token");
+  if (launchToken) {
+    params.delete("grudge_token");
+    const clean = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      window.location.pathname + (clean ? `?${clean}` : "") + window.location.hash,
+    );
+    bridgeGrudgeLaunchToken(launchToken).catch(() => {});
+    return isAuthenticated();
   }
+  return pickupSsoFromUrl();
+}
 
-  if (!token) return;
+export function getPendingRoute(): string {
+  return localStorage.getItem("grudge_auth_pending_route") || DEFAULT_POST_LOGIN_ROUTE;
+}
 
-  localStorage.setItem('grudge_auth_token', token);
-  if (grudgeId) localStorage.setItem('grudge_id', grudgeId);
-  if (name) localStorage.setItem('grudge_username', name);
-
-  // Restore the route the user was trying to reach before the auth redirect
-  const pendingRoute = localStorage.getItem('grudge_auth_pending_route') || 'gdevelop';
-  localStorage.removeItem('grudge_auth_pending_route');
-  window.history.replaceState(null, '', location.pathname + '#' + pendingRoute);
+export function clearPendingRoute(): void {
+  localStorage.removeItem("grudge_auth_pending_route");
 }
 
 /**
- * Returns true if the user has a Grudge token. Otherwise redirects to
- * id.grudge-studio.com/auth and returns false.
+ * Redirect to Grudge ID login. Stashes current hash route for post-login return.
  */
 export function requireGrudgeAuth(): boolean {
-  if (localStorage.getItem('grudge_auth_token')) return true;
-  // Stash the current hash route so we land back on it after login
-  const currentRoute = window.location.hash.replace(/^#\/?/, '');
-  if (currentRoute) localStorage.setItem('grudge_auth_pending_route', currentRoute);
-  const redirect = encodeURIComponent(GRUDGE_APP_ORIGIN);
-  window.location.href = `${GRUDGE_AUTH_URL}?redirect=${redirect}&app=rpg-sprite-attack`;
+  if (isAuthenticated()) return true;
+
+  const currentRoute = window.location.hash.replace(/^#\/?/, "");
+  const pathnameRoute = window.location.pathname.replace(/^\//, "").toLowerCase();
+  const stash =
+    currentRoute ||
+    (pathnameRoute && pathnameRoute !== "auth/callback" ? pathnameRoute : "");
+  if (stash) localStorage.setItem("grudge_auth_pending_route", stash);
+
+  window.location.href = buildSsoLoginUrl();
   return false;
 }
 
-/**
- * Clears all Grudge auth state and reloads the page (which will trigger
- * requireGrudgeAuth → redirect to id.grudge-studio.com).
- */
-export function grudgeSignOut() {
-  localStorage.removeItem('grudge_auth_token');
-  localStorage.removeItem('grudge_id');
-  localStorage.removeItem('grudge_username');
-  localStorage.removeItem('grudge_auth_pending_route');
-  window.location.href = GRUDGE_APP_ORIGIN;
+export function grudgeSignOut(): void {
+  purgeGrudgeClientState();
+  clearToken();
+  window.location.href = window.location.origin;
 }
 
-/** Quick check without side-effects. */
 export function isGrudgeAuthed(): boolean {
-  return !!localStorage.getItem('grudge_auth_token');
+  return isAuthenticated();
 }

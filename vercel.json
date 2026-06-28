@@ -22,6 +22,38 @@
     }
   ],
   "rewrites": [
+    {
+      "source": "/api/auth/me",
+      "destination": "https://grudge-builder-production.up.railway.app/api/auth/me"
+    },
+    {
+      "source": "/api/auth/grudge-bridge",
+      "destination": "https://grudge-builder-production.up.railway.app/api/auth/grudge-bridge"
+    },
+    {
+      "source": "/api/auth/puter-sso",
+      "destination": "https://grudge-builder-production.up.railway.app/api/auth/puter-sso"
+    },
+    {
+      "source": "/api/auth/login",
+      "destination": "https://grudge-builder-production.up.railway.app/api/auth/login"
+    },
+    {
+      "source": "/api/account",
+      "destination": "https://grudge-builder-production.up.railway.app/api/account"
+    },
+    {
+      "source": "/api/account/:path*",
+      "destination": "https://grudge-builder-production.up.railway.app/api/account/:path*"
+    },
+    {
+      "source": "/api/characters",
+      "destination": "https://grudge-builder-production.up.railway.app/api/characters"
+    },
+    {
+      "source": "/api/characters/:path*",
+      "destination": "https://grudge-builder-production.up.railway.app/api/characters/:path*"
+    },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

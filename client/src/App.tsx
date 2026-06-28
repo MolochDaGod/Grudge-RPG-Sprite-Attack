@@ -5,13 +5,16 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { PuterAuthProvider } from "@/contexts/PuterAuthContext";
-import { consumeGrudgeAuth, requireGrudgeAuth, isGrudgeAuthed } from "@/lib/grudgeAuth";
+import { GrudgeAccountProvider } from "@/contexts/GrudgeAccountContext";
+import { consumeGrudgeAuth, requireGrudgeAuth } from "@/lib/grudgeAuth";
+import { isAuthenticated } from "@/lib/grudgeBackend";
 import GrudgeFighter2D from "@/pages/GrudgeFighter2D";
 import ToonAdmin from "@/pages/ToonAdmin";
 import MapAdmin from "@/pages/MapAdmin";
+import AuthCallbackPage from "@/pages/AuthCallback";
 
-// Consume auth callback params on initial page load
 consumeGrudgeAuth();
+
 function StartupIntro({ onComplete }: { onComplete: () => void }) {
   const [showSkip, setShowSkip] = useState(false);
 
@@ -49,25 +52,29 @@ function StartupIntro({ onComplete }: { onComplete: () => void }) {
 }
 
 function getActiveRoute(): string {
-  // Support both path-based (/toonadmin) and hash-based (#toonadmin) routing
   const path = window.location.pathname.replace(/^\//, "").toLowerCase();
+  if (path === "auth/callback") return "auth/callback";
   const hash = window.location.hash.replace(/^#\/?/, "").toLowerCase();
   return hash || path;
 }
 
 function GameApp() {
-  const [authed] = useState(isGrudgeAuthed);
+  const [authed, setAuthed] = useState(() => isAuthenticated());
   const [route, setRoute] = useState(getActiveRoute);
   const [showStartupIntro, setShowStartupIntro] = useState(() => {
-    // Skip intro entirely when navigating directly to admin pages
     const r = getActiveRoute();
-    return r !== "toonadmin" && r !== "mapadmin";
+    return r !== "toonadmin" && r !== "mapadmin" && r !== "auth/callback";
   });
 
-  // Gate the entire app behind Grudge auth
   useEffect(() => {
-    if (!authed) requireGrudgeAuth();
-  }, [authed]);
+    if (consumeGrudgeAuth() || isAuthenticated()) {
+      setAuthed(true);
+      return;
+    }
+    if (route !== "auth/callback") {
+      requireGrudgeAuth();
+    }
+  }, [route]);
 
   useEffect(() => {
     const update = () => setRoute(getActiveRoute());
@@ -79,10 +86,14 @@ function GameApp() {
     };
   }, []);
 
+  if (route === "auth/callback") {
+    return <AuthCallbackPage />;
+  }
+
   if (!authed) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="text-amber-300 animate-pulse text-lg">Redirecting to login…</div>
+        <div className="text-amber-300 animate-pulse text-lg">Redirecting to Grudge login…</div>
       </div>
     );
   }
@@ -97,17 +108,14 @@ function GameApp() {
     setRoute("");
   };
 
-  // /toonadmin route
   if (route === "toonadmin") {
     return <ToonAdmin onBack={goHome} />;
   }
 
-  // /mapadmin route
   if (route === "mapadmin") {
     return <MapAdmin onBack={goHome} />;
   }
 
-  // Cross-app routing: engine / gdevelop
   if (route === "engine") {
     return (
       <div className="min-h-screen bg-black">
@@ -115,7 +123,7 @@ function GameApp() {
           <button onClick={goHome} className="text-white/70 hover:text-white text-sm">← Back to Hub</button>
           <span className="text-amber-300 font-bold">The Engine — 3D Game</span>
         </div>
-        <iframe src="https://dungeon-crawler-quest.vercel.app/editor" className="w-full" style={{ height: 'calc(100vh - 48px)', border: 'none' }} title="The Engine" />
+        <iframe src="https://dungeon-crawler-quest.vercel.app/editor" className="w-full" style={{ height: "calc(100vh - 48px)", border: "none" }} title="The Engine" />
       </div>
     );
   }
@@ -127,17 +135,15 @@ function GameApp() {
           <button onClick={goHome} className="text-white/70 hover:text-white text-sm">← Back to Hub</button>
           <span className="text-amber-300 font-bold">GDevelop Studio</span>
         </div>
-        <iframe src="https://gdevelop-assistant.vercel.app" className="w-full" style={{ height: 'calc(100vh - 48px)', border: 'none' }} title="GDevelop Studio" />
+        <iframe src="https://gdevelop-assistant.vercel.app" className="w-full" style={{ height: "calc(100vh - 48px)", border: "none" }} title="GDevelop Studio" />
       </div>
     );
   }
 
-  // Fighter game route
   if (route === "fighter") {
     return <GrudgeFighter2D onBack={goHome} />;
   }
 
-  // Default: Landing Hub with nav cards
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-black text-white flex flex-col items-center justify-center p-6 gap-8">
       <div className="text-center">
@@ -176,8 +182,10 @@ function App() {
       <TooltipProvider>
         <ThemeProvider>
           <PuterAuthProvider>
-            <GameApp />
-            <Toaster />
+            <GrudgeAccountProvider>
+              <GameApp />
+              <Toaster />
+            </GrudgeAccountProvider>
           </PuterAuthProvider>
         </ThemeProvider>
       </TooltipProvider>

@@ -6,6 +6,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import path from "path";
 import { hasDb } from "./db";
+import { registerGrudgeBackendProxy } from "./grudgeProxy";
 
 const app = express();
 const httpServer = createServer(app);
@@ -44,7 +45,7 @@ app.use(helmet({
 }));
 
 // ── Global CORS for all /api routes ──────────────────────────────
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:5000').split(',').map(s => s.trim());
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:5000,https://grudge-rpg-sprite-attack.vercel.app,https://grudge-rpg-sprite-attack-grudgenexus.vercel.app,https://molochdagod.github.io').split(',').map(s => s.trim());
 app.use('/api', cors({
   origin: (origin, cb) => {
     // Allow requests with no origin (curl, server-to-server) and listed origins
@@ -131,6 +132,7 @@ app.use((req, res, next) => {
   const { setupPvP } = await import("./pvp");
   setupPvP(httpServer);
 
+  registerGrudgeBackendProxy(app);
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

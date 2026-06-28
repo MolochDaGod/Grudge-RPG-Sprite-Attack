@@ -48,20 +48,31 @@ export function getSmashId(grudgeId: string): string | undefined {
   return CHARACTER_IDENTITY_MAP.find(c => c.grudgeId === grudgeId)?.smashId;
 }
 
-/** Sync selected fighter to Grudge backend (fire and forget) */
-export async function syncFighterSelection(smashId: string): Promise<void> {
-  const token = localStorage.getItem('grudge_auth_token');
-  if (!token) return;
-  const grudgeId = getGrudgeId(smashId);
-  if (!grudgeId) return;
+const FIGHTER_PREF_KEY = "grudge_smash_fighter";
+
+function accountStorageKey(): string {
+  return localStorage.getItem("grudge_account_id") || localStorage.getItem("grudge_id") || "guest";
+}
+
+/** Load last fighter pick for this Grudge account (local + optional cloud). */
+export function loadSavedFighterPick(): string | null {
   try {
-    const apiBase = (import.meta as any).env?.VITE_GRUDGE_GAME_API || 'https://api.grudge-studio.com';
-    await fetch(`${apiBase}/v1/player/fighter`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ grudgeId, smashId, app: 'grudge-smash' }),
-    });
+    return localStorage.getItem(`${FIGHTER_PREF_KEY}:${accountStorageKey()}`);
   } catch {
-    // Non-critical — don't block gameplay
+    return null;
   }
+}
+
+/** Sync selected fighter to Grudge account profile (local persistence + backend account id). */
+export async function syncFighterSelection(smashId: string): Promise<void> {
+  const grudgeCharId = getGrudgeId(smashId);
+  if (!grudgeCharId) return;
+
+  try {
+    localStorage.setItem(`${FIGHTER_PREF_KEY}:${accountStorageKey()}`, smashId);
+    localStorage.setItem("grudge_smash_last_fighter", smashId);
+  } catch {
+    /* ignore */
+  }
+
 }

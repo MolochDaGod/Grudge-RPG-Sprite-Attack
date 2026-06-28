@@ -1,8 +1,15 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
-export default defineConfig({
+const RAILWAY_API =
+  process.env.VITE_GAME_DATA_API ||
+  process.env.VITE_GRUDGE_API_URL ||
+  "https://grudge-builder-production.up.railway.app";
+
+export default defineConfig(({ mode }) => {
+  loadEnv(mode, path.resolve(import.meta.dirname), "");
+  return {
   plugins: [
     react(),
   ],
@@ -22,5 +29,11 @@ export default defineConfig({
       strict: true,
       deny: ["**/.*"],
     },
+    proxy: {
+      "/api/auth": { target: RAILWAY_API, changeOrigin: true, secure: true },
+      "/api/account": { target: RAILWAY_API, changeOrigin: true, secure: true },
+      "/api/characters": { target: RAILWAY_API, changeOrigin: true, secure: true },
+    },
   },
+};
 });
