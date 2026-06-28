@@ -2,11 +2,7 @@
  * Proxy Grudge account/auth API to production game-data backend.
  */
 import type { Express, Request, Response, NextFunction } from "express";
-
-const GRUDGE_DATA_API =
-  process.env.GRUDGE_GAME_DATA_API ||
-  process.env.VITE_GAME_DATA_API ||
-  "https://grudge-api-production-0d46.up.railway.app";
+import { GRUDGE_GAME_DATA_API } from "./fleetConfig";
 
 const PROXY_PREFIXES = ["/api/auth", "/api/account", "/api/characters", "/api/wallet", "/api/treaty"];
 
@@ -17,7 +13,7 @@ export function registerGrudgeBackendProxy(app: Express): void {
       return next();
     }
 
-    const target = `${GRUDGE_DATA_API}${req.originalUrl}`;
+    const target = `${GRUDGE_GAME_DATA_API}${req.originalUrl}`;
     try {
       const headers: Record<string, string> = {};
       if (req.get("authorization")) headers.Authorization = req.get("authorization")!;
@@ -44,5 +40,5 @@ export function registerGrudgeBackendProxy(app: Express): void {
     }
   });
 
-  console.log(`[grudge-proxy] /api/{auth,account,characters,wallet,treaty} → ${GRUDGE_DATA_API}`);
+  console.log(`[grudge-proxy] /api/{auth,account,characters,wallet,treaty} → ${GRUDGE_GAME_DATA_API}`);
 }

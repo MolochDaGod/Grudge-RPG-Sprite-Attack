@@ -57,10 +57,12 @@ export function usePvP(): PvPHook {
     });
 
     socket.on("connect_error", () => {
+      const localDev =
+        import.meta.env.DEV && PVP_SERVER_URL === window.location.origin;
       setError(
-        PVP_SERVER_URL === window.location.origin
-          ? "PvP server not running. Start with: npm run dev (runs on localhost:5000)"
-          : `Cannot reach PvP server at ${PVP_SERVER_URL}. Server may be offline.`
+        localDev
+          ? "PvP server not running. Start the dev server with npm run dev."
+          : `Cannot reach PvP server at ${PVP_SERVER_URL}. Server may be offline.`,
       );
       setState("disconnected");
       socket.disconnect();

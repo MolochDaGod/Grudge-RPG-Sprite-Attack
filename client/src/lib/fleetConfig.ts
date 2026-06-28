@@ -15,14 +15,16 @@ export const GRUDGE_AUTH_GATEWAY =
 export const GRUDGE_ASSETS_CDN =
   env.VITE_ASSETS_URL || "https://assets.grudge-studio.com";
 
-/** PvP WebSocket (Socket.IO) — co-located on game server or dedicated pvp host. */
+/** PvP Socket.IO — dedicated Railway pvp-server (live). */
 export const GRUDGE_PVP_URL =
-  env.VITE_PVP_SERVER_URL || "https://pvp.grudge-studio.com";
+  env.VITE_PVP_SERVER_URL || "https://grudge-pvp-server-production.up.railway.app";
 
-/** Production app origin for SSO redirect_uri (custom domain preferred). */
+/** Production app origin for SSO redirect_uri (Vercel prod deployment). */
 export const GRUDGE_APP_ORIGIN =
   env.VITE_APP_ORIGIN ||
-  (typeof window !== "undefined" ? window.location.origin : "https://rpg.grudge-studio.com");
+  (typeof window !== "undefined"
+    ? window.location.origin
+    : "https://grudge-rpg-sprite-attack-grudgenexus.vercel.app");
 
 /** Fleet game embeds — production subdomains, not preview URLs. */
 export const FLEET_EMBEDS = {

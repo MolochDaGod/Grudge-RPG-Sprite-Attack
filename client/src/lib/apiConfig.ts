@@ -1,6 +1,6 @@
 /**
  * REST + PvP configuration for Sprite Attack.
- * Production: same-origin /api (Vercel rewrites) + pvp.grudge-studio.com.
+ * Production: same-origin /api (Vercel rewrites) + grudge-pvp-server Railway host.
  */
 import { GRUDGE_GAME_DATA_API, GRUDGE_PVP_URL, GRUDGE_APP_ORIGIN } from "./fleetConfig";
 

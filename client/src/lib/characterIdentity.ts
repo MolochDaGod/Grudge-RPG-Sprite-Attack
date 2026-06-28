@@ -4,7 +4,7 @@
  * Maps fighter IDs across all Grudge Studio apps:
  * - Grudge Smash (this app)
  * - grudgewarlords.com / client.grudge-studio.com (The Engine / 3D game)
- * - GDevelop (gdevelop-assistant.vercel.app)
+ * - WCS / GDevelop (wcs.grudge-studio.com)
  * 
  * When a player picks a main fighter here, their Grudge backend profile
  * stores the `grudgeId` so it carries across apps.

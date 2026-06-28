@@ -7,6 +7,7 @@ import { createServer } from "http";
 import path from "path";
 import { hasDb } from "./db";
 import { registerGrudgeBackendProxy } from "./grudgeProxy";
+import { GRUDGE_GAME_DATA_API, GRUDGE_PVP_URL, PRODUCTION_CORS_ORIGINS } from "./fleetConfig";
 
 const app = express();
 const httpServer = createServer(app);
@@ -24,12 +25,17 @@ app.use(helmet({
       connectSrc: [
         "'self'",
         "https://*.grudge-studio.com",
+        "https://*.up.railway.app",
+        GRUDGE_GAME_DATA_API,
+        GRUDGE_PVP_URL,
         "https://api.grudge-studio.com",
         "https://js.puter.com",
         "https://puter.com",
         "wss://*.grudge-studio.com",
-        "ws://localhost:*",
-        "http://localhost:*",
+        "wss://*.up.railway.app",
+        ...(process.env.NODE_ENV !== "production"
+          ? ["ws://localhost:*", "http://localhost:*"]
+          : []),
       ],
       frameSrc: ["'self'", "https://*.grudge-studio.com", "https://js.puter.com"],
       workerSrc: ["'self'", "blob:"],
@@ -45,13 +51,14 @@ app.use(helmet({
 }));
 
 // ── Global CORS for all /api routes ──────────────────────────────
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || [
-  'http://localhost:5000',
-  'https://rpg.grudge-studio.com',
-  'https://grudge-rpg-sprite-attack-grudgenexus.vercel.app',
-  'https://id.grudge-studio.com',
-  'https://grudgewarlords.com',
-].join(',')).split(',').map(s => s.trim());
+const defaultCors =
+  process.env.NODE_ENV === "production"
+    ? PRODUCTION_CORS_ORIGINS.join(",")
+    : ["http://localhost:5000", ...PRODUCTION_CORS_ORIGINS].join(",");
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || defaultCors)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 app.use('/api', cors({
   origin: (origin, cb) => {
     // Allow requests with no origin (curl, server-to-server) and listed origins
