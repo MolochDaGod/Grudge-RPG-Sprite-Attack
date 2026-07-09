@@ -8,7 +8,7 @@
     "VITE_AUTH_GATEWAY_URL": "https://id.grudge-studio.com",
     "VITE_GAME_DATA_API": "https://grudge-api-production-0d46.up.railway.app",
     "VITE_PVP_SERVER_URL": "https://grudge-pvp-server-production.up.railway.app",
-    "VITE_APP_ORIGIN": "https://grudge-rpg-sprite-attack-grudgenexus.vercel.app",
+    "VITE_APP_ORIGIN": "https://grudge-rpg-sprite-attack.vercel.app",
     "VITE_ASSETS_URL": "https://assets.grudge-studio.com",
     "VITE_ENGINE_URL": "https://dcq.grudge-studio.com/editor",
     "VITE_GDEVELOP_URL": "https://wcs.grudge-studio.com",
@@ -19,14 +19,13 @@
       "source": "/(.*)",
       "headers": [
         { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
         { "key": "X-XSS-Protection", "value": "1; mode=block" },
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
         { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), interest-cohort=()" },
         { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.puter.com https://fonts.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; media-src 'self' blob: data:; connect-src 'self' https://*.grudge-studio.com https://*.up.railway.app https://grudge-api-production-0d46.up.railway.app https://js.puter.com https://puter.com wss://*.grudge-studio.com wss://*.up.railway.app; frame-src 'self' https://*.grudge-studio.com https://js.puter.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; upgrade-insecure-requests"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.puter.com https://fonts.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; media-src 'self' blob: data:; connect-src 'self' https://*.grudge-studio.com https://*.up.railway.app https://grudge-api-production-0d46.up.railway.app https://js.puter.com https://puter.com wss://*.grudge-studio.com wss://*.up.railway.app; frame-src 'self' https://*.grudge-studio.com https://js.puter.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self' https://grudge-studio.com https://*.grudge-studio.com https://*.vercel.app; upgrade-insecure-requests"
         }
       ]
     }
