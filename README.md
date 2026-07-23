@@ -1,11 +1,12 @@
-# Grudge Smash
+# Tethical (Grudge Smash)
 
 A 2D sprite-based fighting game with 39 playable characters across 3 factions, AI opponents, online PvP, elliptical body collision, a stamina system, startup cinematic intro, and Smash Bros-style super attacks.
 
-**Play Now:** [grudge-rpg-sprite-attack.vercel.app](https://grudge-rpg-sprite-attack-grudgenexus.vercel.app)
-**Landing Page:** [molochdagod.github.io/Grudge-RPG-Sprite-Attack](https://molochdagod.github.io/Grudge-RPG-Sprite-Attack)
-**Character Editor:** [#toonadmin](https://grudge-rpg-sprite-attack-grudgenexus.vercel.app/#toonadmin)
-**Map Editor:** [#mapadmin](https://grudge-rpg-sprite-attack-grudgenexus.vercel.app/#mapadmin)
+**Canonical (live):** [water.grudge-studio.com](https://water.grudge-studio.com)  
+**Auth:** [id.grudge-studio.com](https://id.grudge-studio.com/login?redirect_uri=https%3A%2F%2Fwater.grudge-studio.com%2Fauth%2Fcallback)  
+**Vercel alias:** [grudge-rpg-sprite-attack-grudgenexus.vercel.app](https://grudge-rpg-sprite-attack-grudgenexus.vercel.app)  
+**Character Editor:** [#toonadmin](https://water.grudge-studio.com/#toonadmin)  
+**Map Editor:** [#mapadmin](https://water.grudge-studio.com/#mapadmin)  
 **PvP Server:** [grudge-pvp-server-production.up.railway.app](https://grudge-pvp-server-production.up.railway.app)
 
 ## Features

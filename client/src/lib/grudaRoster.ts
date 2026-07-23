@@ -311,7 +311,8 @@ export const GRUDA_ROSTER: GrudaCharDef[] = [
     atk:12, spd:5.8, superDmg:32, superName:"Bolt Barrage" },
 
   // ─── Assists: 128px heroes ────────────────────────────────────
-  { id:"fire-knight", name:"Fire Knight", folder:"fire-knight", color:"#e74c3c", faction:"crusade", role:"assist", frameSize:128,
+  // Wide cells: 288×128 (not square). Declared frames divide sheet width cleanly.
+  { id:"fire-knight", name:"Fire Knight", folder:"fire-knight", color:"#e74c3c", faction:"crusade", role:"assist", frameSize:288,
     idle:["idle.png",8], walk:["run.png",8], attack:["attack1.png",11],
     hurt:["hurt.png",6], death:["death.png",13], block:["block.png",10],
     jump:["jump.png",20], attack2:["attack2.png",19], special:["special.png",18], roll:["roll.png",8],
@@ -321,7 +322,7 @@ export const GRUDA_ROSTER: GrudaCharDef[] = [
     idle:["idle.png",7], walk:["walk.png",6], attack:["attack1.png",4],
     hurt:["hurt.png",3], death:["death.png",6], jump:["jump.png",9],
     attack2:["attack2.png",4], cast:["fireball.png",8],
-    special:["area_attack.png",9], roll:["roll.png",6],
+    special:["flame_jet.png",14], // 1792×128 strip; area_attack.png missing from pack
     projectile:"fireball.png",
     assist:{ assistType:"beta", assistAnimation:"cast", cooldown:5, damage:14 },
     atk:10, spd:5.4, superDmg:42, superName:"Meteor Rain" },
@@ -329,7 +330,7 @@ export const GRUDA_ROSTER: GrudaCharDef[] = [
     idle:["idle.png",7], walk:["walk.png",7], attack:["attack1.png",10],
     hurt:["hurt.png",3], death:["death.png",5], jump:["jump.png",8],
     attack2:["attack2.png",4], cast:["light_ball.png",7],
-    special:["area_attack.png",12], roll:["roll.png",7],
+    special:["light_charge.png",13], // 1664×128; area_attack/roll missing from pack
     effectSrc:"lightning-bolt.png", effectFrames:6,
     assist:{ assistType:"gamma", assistAnimation:"special", cooldown:5, damage:15 },
     atk:11, spd:5.6, superDmg:40, superName:"Thunder God" },
@@ -358,14 +359,15 @@ export const GRUDA_ROSTER: GrudaCharDef[] = [
     cast:["heal.png",12], attack2:["attack2.png",12],
     assist:{ assistType:"gamma", assistAnimation:"cast", cooldown:6, damage:12 },
     atk:9, spd:5.2, superDmg:38, superName:"Tidal Wave" },
-  { id:"leaf-ranger", name:"Leaf Ranger", folder:"leaf-ranger", color:"#229954", faction:"fabled", role:"assist", frameSize:128,
+  // Wide cells 288×128 (idle 3456/12, special etc.)
+  { id:"leaf-ranger", name:"Leaf Ranger", folder:"leaf-ranger", color:"#229954", faction:"fabled", role:"assist", frameSize:288,
     idle:["idle.png",12], walk:["run.png",10], attack:["attack1.png",10],
     hurt:["take_hit.png",6], death:["death.png",19], special:["special.png",17],
     attack2:["attack3.png",12], roll:["roll.png",8],
     projectile:"arrow_short.png",
     assist:{ assistType:"beta", assistAnimation:"attack", cooldown:5, damage:12 },
     atk:10, spd:7.2, superDmg:28, superName:"Nature's Wrath" },
-  { id:"wind-hashashin", name:"Wind Hashashin", folder:"wind-hashashin", color:"#1abc9c", faction:"fabled", role:"assist", frameSize:128,
+  { id:"wind-hashashin", name:"Wind Hashashin", folder:"wind-hashashin", color:"#1abc9c", faction:"fabled", role:"assist", frameSize:288,
     idle:["idle.png",8], walk:["run.png",8], attack:["attack1.png",8],
     hurt:["take_hit.png",6], death:["death.png",19], special:["special.png",30],
     attack2:["attack3.png",26], roll:["roll.png",6],
@@ -406,9 +408,10 @@ export const GRUDA_ROSTER: GrudaCharDef[] = [
     assist:{ assistType:"alpha", assistAnimation:"attack", cooldown:5, damage:17 },
     atk:15, spd:6.0, superDmg:37, superName:"Soul Rend" },
 
-  { id:"elf-mage", name:"Elf Mage", folder:"Elf-mage", color:"#9b59b6", faction:"fabled", role:"assist", frameSize:190,
+  // 1386×190 idle → 6 frames of 231×190 (declared frames divide width)
+  { id:"elf-mage", name:"Elf Mage", folder:"Elf-mage", color:"#9b59b6", faction:"fabled", role:"assist", frameSize:231,
     idle:["Idle.png",6], walk:["Run.png",8], attack:["Attack1.png",8],
-    hurt:["Hit.png",4], death:["Death.png",7], jump:["Jump.png",2], attack2:["Attack2.png",8],
+    hurt:["Hit.png",3], death:["Death.png",7], jump:["Jump.png",2], fall:["Fall.png",2], attack2:["Attack2.png",8],
     projectile:"fireball.png",
     assist:{ assistType:"beta", assistAnimation:"attack", cooldown:5, damage:13 },
     atk:11, spd:5.6, superDmg:40, superName:"Arcane Storm" },

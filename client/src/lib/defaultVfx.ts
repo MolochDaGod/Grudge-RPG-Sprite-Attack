@@ -126,6 +126,14 @@ const NATURE_VFX: CharVfxDefaults = {
 
 // Per-character VFX assignments
 export const DEFAULT_CHAR_VFX: Record<string, CharVfxDefaults> = {
+  // ── Mains ──────────────────────────────────────────────────
+  "racalvin":         { ...RANGER_VFX, attack: { hit: "impactFireA", swing: "slashOrangeMd" }, special: { hit: "fireExplosion", swing: "flameLash" }, dashAttack: { hit: "hitEffect3", swing: "slashOrangeLg" } },
+  "hustle-knight":    SWORD_VFX,
+  "hustle-mage":      MAGIC_VFX,
+  "hustle-berserker": { ...SWORD_VFX, attack: { hit: "hitEffect3", swing: "demonSlash2" }, special: { hit: "impactRedA", swing: "demonSlash3" }, comboQ3: { hit: "impactOrangeA", swing: "demonSlash1" } },
+  "hustle-rogue":     { ...DARK_VFX, attack: { hit: "hitEffect2", swing: "slashPurpleMd" }, dashAttack: { hit: "hitBurst", swing: "shadowSlash" } },
+  "hustle-archer":    RANGER_VFX,
+
   // Crusade — Sword fighters
   "knight":           SWORD_VFX,
   "swordsman":        SWORD_VFX,
@@ -177,6 +185,8 @@ export const DEFAULT_CHAR_VFX: Record<string, CharVfxDefaults> = {
   "lightning-mage":   { ...MAGIC_VFX, attack: { hit: "thunderHit", swing: "arcanelighting" }, special: { hit: "impactYellowA", swing: "arcanelighting" } },
   "free-knight":      MAGIC_VFX,  // Dwarf Mage
   "wanderer-magician": MAGIC_VFX,
+  "shadow-warrior":   DARK_VFX,
+  "gunslinger":       { ...RANGER_VFX, attack: { hit: "sparkBurst", swing: "slashOrangeMd" }, special: { hit: "explosionSmall", swing: "fireBreath" } },
 };
 
 /** Get default VFX for a character's action slot */

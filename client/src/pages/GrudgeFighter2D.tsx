@@ -6,7 +6,17 @@ import { ArrowLeft, Crosshair, Shield, Zap, Wifi } from "lucide-react";
 import { usePvP } from "@/hooks/usePvP";
 import { GRUDA_ROSTER, type GrudaCharDef, type AssistType, computeRenderScale, applyOverrides, computeCollisionSizeWithOverrides, getMainRoster, getAssistRoster } from "@/lib/grudaRoster";
 import { loadOverridesFromServer, type CharOverrides, type AllOverrides, type ActionOverride } from "@/lib/charConfig";
-import { preloadVfx, getVfxById, getVfxImage, drawVfxFrame, type VfxDef } from "@/lib/vfxLibrary";
+import {
+    preloadVfx,
+    getVfxById,
+    getVfxImage,
+    drawVfxFrame,
+    vfxDisplayScale,
+    resolveAttackEffectVfx,
+    registerVfxImage,
+    makeStripVfx,
+    type VfxDef,
+} from "@/lib/vfxLibrary";
 import { getFaction, type FactionId } from "@/lib/factions";
 import { playSound, preloadSounds as preloadGameSounds } from "@/lib/gameSounds";
 import { getDefaultVfx } from "@/lib/defaultVfx";
@@ -17,7 +27,7 @@ import { syncFighterSelection, loadSavedFighterPick } from "@/lib/characterIdent
 type FighterId = "p1" | "p2";
 type AnimationState = "idle" | "run" | "jump" | "fall" | "attack" | "attack2" | "special" | "takeHit" | "death" | "dodge";
 type SpecialMoveKind = "neutral" | "up" | "down" | "airForward" | "airDown";
-type MoveVariant = "none" | "normal" | "altNormal" | "dash" | "ranged" | "upSpecial" | "downSpecial" | "rescue";
+type MoveVariant = "none" | "normal" | "altNormal" | "dash" | "ranged" | "upSpecial" | "downSpecial" | "rescue" | "slide";
 
 interface FighterSpriteDef {
     src: string;
@@ -93,6 +103,21 @@ interface FighterRuntime {
     moveVariant: MoveVariant;
     rescueUsed: boolean;       // true after rescue roll in air — resets on landing
     moveSet: CharacterMoveSet;
+    /** AA/DD slide dodge — start X of the path (0 = not sliding) */
+    dodgeStartX: number;
+    /** AA/DD slide dodge — end X of the path (front/behind along the line) */
+    dodgeEndX: number;
+}
+
+/** Fading silhouette ghosts left during AA/DD slide */
+interface DodgeAfterImage {
+    id: string;
+    fighterId: FighterId;
+    x: number;
+    y: number;
+    facing: 1 | -1;
+    createdAt: number;
+    expiresAt: number;
 }
 
 interface Projectile {
@@ -285,11 +310,17 @@ const DASH_VX_PER_POINT = 7;      // velocity per stamina point spent
 const DODGE_DOUBLE_TAP_MS = 220;   // AA / DD input window
 const SPACE_DOUBLE_TAP_MS = 250;   // spacebar double-tap for rescue roll
 const DOWN_DROP_DOUBLE_TAP_MS = 220; // SS input window
-const DODGE_LOCK_MS = 340;         // total dodge action duration
-const DODGE_IFRAME_MS = 260;       // invulnerable window during dodge
-const DODGE_COOLDOWN_MS = 520;     // prevent dodge spam
-const DODGE_SPEED = 13 * SPEED_SCALE;
+// AA/DD slide dodge — no roll loop; smooth afterimage fade + full i-frames
+// Distance is 3× the old ~90px quick-dodge so path in front/behind is meaningfully longer
+const DODGE_DURATION_MS = 280;
+const DODGE_LOCK_MS = DODGE_DURATION_MS;
+const DODGE_IFRAME_MS = DODGE_DURATION_MS; // immune for entire slide
+const DODGE_COOLDOWN_MS = 480;
+const DODGE_DISTANCE = 270; // px along horizontal path (3× baseline)
+const DODGE_SPEED = 13 * SPEED_SCALE; // legacy — rescue / misc still reference
 const DODGE_AIR_SPEED = 14.5 * SPEED_SCALE;
+const DODGE_AFTERIMAGE_LIFE_MS = 240;
+const DODGE_AFTERIMAGE_SPACING = 28; // min px between ghost copies
 const DROP_THROUGH_LOCK_MS = 140;
 const DROP_THROUGH_IGNORE_MS = 260;
 const DROP_THROUGH_VY = 8;
@@ -315,18 +346,18 @@ interface CharacterDef {
     renderScaleX: number; // horizontal render multiplier
     renderScaleY: number; // vertical render multiplier
     hasRollAnimation: boolean;
+    frameSize: number; // px per strip cell — used for auto frame detect
     // ToonAdmin override data carried through for runtime use
     overrideActions?: Partial<Record<string, ActionOverride>>;
     colliderOverrides?: CharOverrides["collider"];
 }
 
-// Active visual effects rendered on the canvas
+// Active visual effects rendered on the canvas (multi-row grid aware via VfxDef)
 interface ActiveEffect {
     id: string;
     x: number;
     y: number;
-    image: HTMLImageElement;
-    frames: number;
+    vfx: VfxDef;
     hold: number;
     frameIndex: number;
     frameTick: number;
@@ -364,6 +395,7 @@ function grudaToCharDef(baseChar: GrudaCharDef, ov?: CharOverrides): CharacterDe
         name: g.name,
         faction: g.faction,
         color: g.color,
+        frameSize: g.frameSize,
         sprites: {
             idle:    s(g.idle[0], g.idle[1], true, "idle"),
             run:     s(g.walk[0], g.walk[1], true, "walk"),
@@ -393,8 +425,14 @@ function grudaToCharDef(baseChar: GrudaCharDef, ov?: CharOverrides): CharacterDe
         },
         attackEffect: g.effectSrc
             ? { src: `/fighter2d/effects/${g.effectSrc}`, frames: g.effectFrames ?? 6, hold: 3 }
-            : { src: "/fighter2d/effects/slash_arc.png", frames: 6, hold: 3 },
-        projectileSrc: g.projectile ? `/fighter2d/projectiles/${g.projectile}` : undefined,
+            : { src: "/fighter2d/effects/slash_arc.png", frames: 2, hold: 3 },
+        projectileSrc: g.projectile
+            ? g.projectile.startsWith("/")
+                ? g.projectile
+                : g.projectile.includes("/")
+                  ? `/fighter2d/characters/${g.folder}/${g.projectile}`
+                  : `/fighter2d/projectiles/${g.projectile}`
+            : undefined,
         projectileFrames: g.projectile ? 1 : undefined,
         renderScaleX: scaleX,
         renderScaleY: scaleY,
@@ -422,17 +460,25 @@ async function loadCharacterRoster(): Promise<CharacterDef[]> {
     return CHARACTER_ROSTER;
 }
 
-/** Get per-move hit frame from ToonAdmin override, or default 4 */
+/** Get per-move hit frame from ToonAdmin override, or ~40% into the attack anim */
 function getHitFrame(charDef: CharacterDef | null, moveVariant: MoveVariant): number {
-    if (!charDef?.overrideActions) return 4;
-    // Map move variants to action slot keys
     const slotMap: Partial<Record<MoveVariant, string>> = {
         normal: "attack", altNormal: "attack2", dash: "dashAttack",
         upSpecial: "special", downSpecial: "special", ranged: "special",
     };
     const slotKey = slotMap[moveVariant];
-    if (!slotKey) return 4;
-    return (charDef.overrideActions[slotKey] as ActionOverride | undefined)?.hitFrame ?? 4;
+    if (charDef?.overrideActions && slotKey) {
+        const ov = (charDef.overrideActions[slotKey] as ActionOverride | undefined)?.hitFrame;
+        if (ov != null) return ov;
+    }
+    // Default: impact near mid-swing of the relevant strip
+    const anim =
+        moveVariant === "altNormal" ? charDef?.sprites.attack2 :
+        moveVariant === "upSpecial" || moveVariant === "downSpecial" || moveVariant === "ranged"
+            ? charDef?.sprites.special
+            : charDef?.sprites.attack;
+    const frames = anim?.frames ?? 6;
+    return Math.max(1, Math.min(frames - 1, Math.floor(frames * 0.4)));
 }
 
 /** Get per-move damage multiplier from ToonAdmin override */
@@ -483,24 +529,26 @@ function approach(value: number, target: number, delta: number): number {
 
 const SWING_VFX_BY_MOVE: Record<MoveVariant, string[]> = {
     none: ["smearH1"],
-    normal: ["smearH1", "smearH2", "vineWhip"],
-    altNormal: ["smearH3", "shadowSlash", "smearV1"],
+    normal: ["smearH1", "smearH2", "slashRedMd"],
+    altNormal: ["smearH3", "slashRedLg", "smearV1"],
     dash: ["smearV2", "smearV3", "dustCloud"],
-    ranged: ["fireBreath", "electricChain", "darkMist", "leafStorm"],
+    ranged: ["slash_ranged", "electricChain", "darkMist", "leafStorm"],
     upSpecial: ["lightningStrike", "holySmite", "smearV2"],
     downSpecial: ["voidPulse", "rockSmash", "bloodSplat"],
     rescue: ["energyBurst", "dustCloud", "smearV3"],
+    slide: ["dustCloud", "smokeVfx3"],
 };
 
 const HIT_VFX_BY_MOVE: Record<MoveVariant, string[]> = {
-    none: ["hit_effect_1"],
-    normal: ["hit_effect_1", "explosionSmall"],
-    altNormal: ["sparkBurst", "hit_effect_1"],
-    dash: ["explosionSmall", "bloodSplat", "hit_effect_1"],
+    none: ["hitEffect1"],
+    normal: ["hitEffect1", "explosionSmall", "hitBurst"],
+    altNormal: ["sparkBurst", "hitEffect2"],
+    dash: ["explosionSmall", "bloodSplat", "hitEffect3"],
     ranged: ["fireBreathHit", "iceShatter", "sparkBurst", "waterSplash"],
     upSpecial: ["lightningStrike", "energyBurst", "holySmite"],
     downSpecial: ["voidPulse", "rockSmash", "bloodSplat"],
-    rescue: ["energyBurst", "explosionSmall", "hit_effect_1"],
+    rescue: ["energyBurst", "explosionSmall", "hitEffect1"],
+    slide: ["dustCloud"],
 };
 
 function hashString(str: string): number {
@@ -555,6 +603,8 @@ function createInitialFighter(id: FighterId, charDef: CharacterDef, stage: Stage
         moveVariant: "none",
         rescueUsed: false,
         moveSet: charDef.moveSet,
+        dodgeStartX: 0,
+        dodgeEndX: 0,
     };
 }
 
@@ -582,6 +632,8 @@ function respawnFighter(fighter: FighterRuntime, stage: StageDefinition): Fighte
         dropThroughUntil: 0,
         moveVariant: "none",
         rescueUsed: false,
+        dodgeStartX: 0,
+        dodgeEndX: 0,
     };
 }
 
@@ -816,19 +868,91 @@ function applyDamage(
 const IMAGE_ALPHA_THRESHOLD = 8;
 const spriteBottomPaddingCache = new Map<string, number>();
 
-function getImageBottomPadding(image: HTMLImageElement): number {
-    const cacheKey = image.currentSrc || image.src;
+/**
+ * Detect horizontal frame count from sheet pixels.
+ *
+ * Priority (many packs use wide non-square frames, e.g. 288×128 fire-knight):
+ *  1) Declared frame count when it evenly divides sheet width (roster SSOT)
+ *  2) preferredFrameSize (character.frameSize) when it divides width
+ *  3) Square cells (width multiple of height)
+ *  4) Common widths
+ */
+function detectStripFrames(
+    image: HTMLImageElement,
+    declaredFrames: number,
+    preferredFrameSize?: number,
+): { frames: number; frameWidth: number; frameHeight: number } {
+    const w = image.naturalWidth || image.width;
+    const h = image.naturalHeight || image.height;
+    if (!w || !h) {
+        return { frames: Math.max(1, declaredFrames), frameWidth: w || 1, frameHeight: h || 1 };
+    }
+
+    // 1) Declared frames divide width cleanly → trust roster (handles wide cells)
+    if (declaredFrames > 0 && w % declaredFrames === 0) {
+        const fw = w / declaredFrames;
+        // Sanity: frame shouldn't be taller than 4× wider weirdness, or narrower than 8px
+        if (fw >= 8 && fw <= h * 4) {
+            return { frames: declaredFrames, frameWidth: fw, frameHeight: h };
+        }
+    }
+
+    // 2) Preferred frame size (character.frameSize)
+    if (preferredFrameSize && preferredFrameSize > 0 && w % preferredFrameSize === 0) {
+        const frames = w / preferredFrameSize;
+        if (frames >= 1 && frames <= 128) {
+            return { frames, frameWidth: preferredFrameSize, frameHeight: h };
+        }
+    }
+
+    // 3) Square frames: width is multiple of height
+    if (w % h === 0) {
+        const frames = w / h;
+        if (frames >= 1 && frames <= 128) {
+            return { frames, frameWidth: h, frameHeight: h };
+        }
+    }
+
+    // 4) Common frame widths (incl. wide-cell packs like 288)
+    const candidates = [preferredFrameSize, 288, 256, 231, 200, 190, 180, 160, 150, 128, 100, 96, 80, 64, 48]
+        .filter((n): n is number => !!n && n > 0);
+    for (const fw of candidates) {
+        if (w % fw === 0) {
+            const frames = w / fw;
+            if (frames >= 1 && frames <= 128) {
+                return { frames, frameWidth: fw, frameHeight: h };
+            }
+        }
+    }
+
+    // 5) Best-effort: round declared
+    const frames = Math.max(1, declaredFrames || 1);
+    return {
+        frames,
+        frameWidth: Math.max(1, Math.round(w / frames)),
+        frameHeight: h,
+    };
+}
+
+/** Bottom transparent padding of a single frame (feet grounding). */
+function getFrameBottomPadding(image: HTMLImageElement, frameWidth: number, frameIndex = 0): number {
+    const cacheKey = `${image.currentSrc || image.src}|fw=${frameWidth}|fi=${frameIndex}`;
     const cached = spriteBottomPaddingCache.get(cacheKey);
     if (cached !== undefined) return cached;
 
+    const fullW = image.naturalWidth || image.width;
+    const fullH = image.naturalHeight || image.height;
+    const sx = Math.min(frameIndex * frameWidth, Math.max(0, fullW - frameWidth));
+    const sw = Math.min(frameWidth, fullW - sx);
+
     const canvas = document.createElement("canvas");
-    canvas.width = image.naturalWidth || image.width;
-    canvas.height = image.naturalHeight || image.height;
+    canvas.width = sw;
+    canvas.height = fullH;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return 0;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(image, 0, 0);
+    ctx.drawImage(image, sx, 0, sw, fullH, 0, 0, sw, fullH);
     const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
     let bottomPadding = 0;
@@ -849,29 +973,78 @@ function getImageBottomPadding(image: HTMLImageElement): number {
     return bottomPadding;
 }
 
-function loadSpriteSet(set: FighterSpriteSet): Promise<Record<AnimationState, RuntimeSprite>> {
+/** @deprecated use getFrameBottomPadding — kept for AttackFrameCanvas preview */
+function getImageBottomPadding(image: HTMLImageElement): number {
+    const h = image.naturalHeight || image.height;
+    const w = image.naturalWidth || image.width;
+    if (!w || !h) return 0;
+    // Prefer square-frame slice when possible
+    const fw = w % h === 0 ? h : w;
+    return getFrameBottomPadding(image, Math.min(fw, w), 0);
+}
+
+function loadOneSprite(
+    state: AnimationState,
+    def: FighterSpriteDef,
+    preferredFrameSize?: number,
+): Promise<[AnimationState, RuntimeSprite]> {
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => {
+            const detected = detectStripFrames(image, def.frames, preferredFrameSize);
+            // Keep declared hold when frames match; retime only on auto-correct
+            const hold =
+                detected.frames !== def.frames
+                    ? detected.frames > 20
+                        ? 2
+                        : detected.frames > 10
+                          ? 3
+                          : detected.frames > 6
+                            ? 4
+                            : 5
+                    : def.hold;
+            const correctedDef: FighterSpriteDef = { ...def, frames: detected.frames, hold };
+            resolve([
+                state,
+                {
+                    image,
+                    frameWidth: detected.frameWidth,
+                    frameHeight: detected.frameHeight,
+                    bottomPadding: getFrameBottomPadding(image, detected.frameWidth, 0),
+                    def: correctedDef,
+                },
+            ]);
+        };
+        image.onerror = () => reject(new Error(`Failed to load sprite: ${def.src}`));
+        image.src = def.src;
+    });
+}
+
+function loadSpriteSet(
+    set: FighterSpriteSet,
+    preferredFrameSize?: number,
+): Promise<Record<AnimationState, RuntimeSprite>> {
     const entries = Object.entries(set) as [AnimationState, FighterSpriteDef][];
     return Promise.all(
-        entries.map(
-            ([state, def]) =>
-                new Promise<[AnimationState, RuntimeSprite]>((resolve, reject) => {
-                    const image = new Image();
-                    image.onload = () => {
-                        resolve([
-                            state,
-                            {
-                                image,
-                                frameWidth: image.width / def.frames,
-                                frameHeight: image.height,
-                                bottomPadding: getImageBottomPadding(image),
-                                def,
-                            },
-                        ]);
-                    };
-                    image.onerror = () => reject(new Error(`Failed to load sprite: ${def.src}`));
-                    image.src = def.src;
-                })
-        )
+        entries.map(async ([state, def]) => {
+            try {
+                return await loadOneSprite(state, def, preferredFrameSize);
+            } catch {
+                // Fall back to idle strip so one missing sheet doesn't kill the match
+                if (state !== "idle" && set.idle) {
+                    try {
+                        const [, idleRt] = await loadOneSprite(state, set.idle, preferredFrameSize);
+                        return [state, { ...idleRt, def: { ...idleRt.def, loop: def.loop } }] as [
+                            AnimationState,
+                            RuntimeSprite,
+                        ];
+                    } catch {
+                        /* fall through */
+                    }
+                }
+                throw new Error(`Failed to load sprite: ${def.src}`);
+            }
+        }),
     ).then((loaded) => Object.fromEntries(loaded) as Record<AnimationState, RuntimeSprite>);
 }
 
@@ -991,6 +1164,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
     } | null>(null);
 
     const activeEffectsRef = useRef<ActiveEffect[]>([]);
+    const afterImagesRef = useRef<DodgeAfterImage[]>([]);
+    const lastAfterImageXRef = useRef<Record<FighterId, number>>({ p1: 0, p2: 0 });
     const screenShakeRef = useRef({ intensity: 0, until: 0 });
     const hitFlashRef = useRef<{ target: FighterId; until: number } | null>(null);
     const debugBoxesRef = useRef(false);
@@ -1123,24 +1298,53 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         if (world.winner || actor.hp <= 0) return;
         if (now < actor.stateLockUntil) return;
 
+        const moveVariant: MoveVariant = useAltAnimation ? "altNormal" : "normal";
+        const charDef = fighterId === "p1" ? p1Pick : p2Pick;
+        const animDef = useAltAnimation ? charDef?.sprites.attack2 : charDef?.sprites.attack;
+        // Lock for full anim length (~16ms/tick × hold × frames), clamped
+        const lockMs = animDef
+            ? Math.max(260, Math.min(1400, animDef.frames * animDef.hold * 16))
+            : 330;
         const next = setState(
             {
                 ...actor,
-                stateLockUntil: now + 330,
+                stateLockUntil: now + lockMs,
                 attackHasConnected: false,
-                moveVariant: useAltAnimation ? "altNormal" : "normal",
+                moveVariant,
+                attackHitFrame: getHitFrame(charDef ?? null, moveVariant),
             },
             useAltAnimation ? "attack2" : "attack",
             now
         );
         playSound("swoosh_light");
 
+        // Swing VFX at attack startup (not only on hit)
+        const fighterKey = charDef?.id ?? fighterId;
+        const slot = useAltAnimation ? "attack2" : "attack";
+        const defaults = getDefaultVfx(fighterKey, slot);
+        const swingId = defaults.swing ?? pickMoveVfxId(moveVariant, fighterKey, SWING_VFX_BY_MOVE);
+        const swingVfx = getVfxById(swingId);
+        if (swingVfx) {
+            getVfxImage(swingVfx.id);
+            activeEffectsRef.current.push({
+                id: `fx-swing-${now}`,
+                x: next.x + next.facing * 48,
+                y: next.y - next.height * 0.45,
+                vfx: swingVfx,
+                hold: 2,
+                frameIndex: 0,
+                frameTick: 0,
+                scale: vfxDisplayScale(swingVfx, 130),
+                flip: next.facing < 0,
+            });
+        }
+
         if (fighterId === "p1") {
             world.p1 = next;
         } else {
             world.p2 = next;
         }
-    }, []);
+    }, [p1Pick, p2Pick]);
 
     const queueSpecial = useCallback((fighterId: FighterId, kind: SpecialMoveKind) => {
         const world = worldRef.current;
@@ -1298,26 +1502,58 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         if (world.winner || actor.hp <= 0) return;
         if (now < actor.stateLockUntil || now < actor.specialCooldownUntil) return;
 
-        const stage = stageRef.current;
-        const grounded = isOnPlatform(actor, stage) !== null;
-        const dodgeSpeed = grounded ? DODGE_SPEED : DODGE_AIR_SPEED;
-        const dodgeVy = grounded ? actor.vy : Math.min(actor.vy * 0.55, 2);
+        // Path directly left/right of the fighter (front or behind depending on facing)
+        const startX = actor.x;
+        const endX = actor.x + direction * DODGE_DISTANCE;
+
+        // Seed first afterimage at start pose
+        afterImagesRef.current.push({
+            id: `ai-${fighterId}-${now}`,
+            fighterId,
+            x: actor.x,
+            y: actor.y,
+            facing: actor.facing,
+            createdAt: now,
+            expiresAt: now + DODGE_AFTERIMAGE_LIFE_MS,
+        });
+        lastAfterImageXRef.current[fighterId] = actor.x;
 
         const next = setState(
             {
                 ...actor,
-                vx: direction * dodgeSpeed,
-                vy: dodgeVy,
+                vx: 0, // position is driven by ease-out slide each tick
+                vy: isOnPlatform(actor, stageRef.current) !== null ? 0 : Math.min(actor.vy * 0.4, 1.5),
                 attackHasConnected: false,
-                moveVariant: "none",
+                moveVariant: "slide",
                 counterUntil: 0,
                 stateLockUntil: now + DODGE_LOCK_MS,
                 specialCooldownUntil: now + DODGE_COOLDOWN_MS,
-                invulnUntil: Math.max(actor.invulnUntil, now + DODGE_IFRAME_MS),
+                invulnUntil: Math.max(actor.invulnUntil, now + DODGE_IFRAME_MS), // full slide immune
+                dodgeStartX: startX,
+                dodgeEndX: endX,
+                frameIndex: 0,
+                frameTick: 0,
             },
             "dodge",
             now
         );
+
+        // Soft dust at feet — not a looping VFX strip
+        const dust = getVfxById("dustCloud") ?? getVfxById("smokeVfx3");
+        if (dust) {
+            getVfxImage(dust.id);
+            activeEffectsRef.current.push({
+                id: `fx-dodge-${now}`,
+                x: startX,
+                y: actor.y - 6,
+                vfx: dust,
+                hold: 2,
+                frameIndex: 0,
+                frameTick: 0,
+                scale: vfxDisplayScale(dust, 70),
+                flip: direction < 0,
+            });
+        }
 
         if (fighterId === "p1") world.p1 = next;
         else world.p2 = next;
@@ -1375,22 +1611,46 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         // Spend up to 3 stamina, always try max
         const spend = Math.min(actor.stamina, STAMINA_COST_DASH);
         const dashVx = actor.facing * spend * DASH_VX_PER_POINT * SPEED_SCALE;
+        const charDef = fighterId === "p1" ? p1Pick : p2Pick;
+        const animDef = charDef?.sprites.attack2;
+        const lockMs = animDef
+            ? Math.max(300, Math.min(900, animDef.frames * animDef.hold * 16))
+            : 350;
 
         const next = setState(
             {
                 ...actor,
                 vx: dashVx,
                 stamina: actor.stamina - spend,
-                stateLockUntil: now + 350,
+                stateLockUntil: now + lockMs,
                 attackHasConnected: false,
                 moveVariant: "dash",
+                attackHitFrame: getHitFrame(charDef ?? null, "dash"),
             },
             "attack2",
             now
         );
+        // Dash swing / dust at startup
+        const fighterKey = charDef?.id ?? fighterId;
+        const defaults = getDefaultVfx(fighterKey, "dashAttack");
+        const swingVfx = getVfxById(defaults.swing ?? pickMoveVfxId("dash", fighterKey, SWING_VFX_BY_MOVE));
+        if (swingVfx) {
+            getVfxImage(swingVfx.id);
+            activeEffectsRef.current.push({
+                id: `fx-dash-${now}`,
+                x: next.x + next.facing * 40,
+                y: next.y - next.height * 0.4,
+                vfx: swingVfx,
+                hold: 2,
+                frameIndex: 0,
+                frameTick: 0,
+                scale: vfxDisplayScale(swingVfx, 120),
+                flip: next.facing < 0,
+            });
+        }
         if (fighterId === "p1") world.p1 = next; else world.p2 = next;
         playSound("swoosh_heavy");
-    }, []);
+    }, [p1Pick, p2Pick]);
 
     // RMB: Block / Parry
     const queueBlock = useCallback((fighterId: FighterId) => {
@@ -1751,8 +2011,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         }
 
         Promise.all([
-            loadSpriteSet(p1Pick.sprites),
-            loadSpriteSet(p2Pick.sprites),
+            loadSpriteSet(p1Pick.sprites, p1Pick.frameSize),
+            loadSpriteSet(p2Pick.sprites, p2Pick.frameSize),
             loadImage("/fighter2d/image/Hills.png"),
             loadImage("/fighter2d/image/castle.png"),
             maybeLoad(p1Pick.attackEffect.src),
@@ -1784,6 +2044,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 }
                 tileImagesRef.current = tileImgs;
                 activeEffectsRef.current = [];
+                afterImagesRef.current = [];
+                lastAfterImageXRef.current = { p1: 0, p2: 0 };
                 setIsReady(true);
             })
             .catch((err: unknown) => {
@@ -1808,14 +2070,113 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
         let previousTime = performance.now();
 
-        // ─── Helper: spawn a visual effect at a position ───────────
-        const spawnEffect = (image: HTMLImageElement | null, frames: number, hold: number, x: number, y: number, flip: boolean) => {
-            if (!image) return;
+        // ─── Helper: spawn multi-row-aware VFX at a world position ─
+        const spawnVfx = (
+            vfx: VfxDef | undefined | null,
+            x: number,
+            y: number,
+            flip: boolean,
+            hold = 2,
+            scale?: number,
+        ) => {
+            if (!vfx) return;
+            getVfxImage(vfx.id);
             activeEffectsRef.current.push({
                 id: `fx-${performance.now()}-${Math.random()}`,
-                x, y, image, frames, hold,
-                frameIndex: 0, frameTick: 0, scale: 3, flip,
+                x,
+                y,
+                vfx,
+                hold,
+                frameIndex: 0,
+                frameTick: 0,
+                scale: scale ?? vfxDisplayScale(vfx, 120),
+                flip,
             });
+        };
+
+        /** Spawn character attack-effect strip (local PNG under fighter2d/effects). */
+        const spawnCharAttackEffect = (
+            charDef: CharacterDef | null | undefined,
+            x: number,
+            y: number,
+            flip: boolean,
+        ) => {
+            if (!charDef?.attackEffect) return;
+            const assets = assetsRef.current;
+            const preloaded =
+                charDef === p1Pick ? assets?.p1Effect :
+                charDef === p2Pick ? assets?.p2Effect :
+                null;
+            const vfx = resolveAttackEffectVfx(charDef.attackEffect.src, charDef.attackEffect.frames);
+            if (preloaded?.complete) {
+                registerVfxImage(vfx, preloaded);
+            } else {
+                getVfxImage(vfx.id);
+            }
+            spawnVfx(vfx, x, y, flip, charDef.attackEffect.hold, vfxDisplayScale(vfx, 140));
+        };
+
+        /** Resolve swing/hit VFX for a fighter + move, preferring ToonAdmin → defaultVfx → pool. */
+        const resolveCombatVfx = (
+            fighterKey: string,
+            moveVariant: MoveVariant,
+            type: "swing" | "hit",
+        ): VfxDef | undefined => {
+            const charDef =
+                fighterKey === p1Pick?.id ? p1Pick :
+                fighterKey === p2Pick?.id ? p2Pick :
+                null;
+            const slot =
+                moveVariant === "dash" ? "dashAttack" :
+                moveVariant === "upSpecial" || moveVariant === "downSpecial" ? "special" :
+                moveVariant === "altNormal" ? "attack2" :
+                moveVariant === "rescue" ? "rescueRoll" :
+                moveVariant === "ranged" ? "special" :
+                "attack";
+            if (charDef?.overrideActions) {
+                const slotMap: Partial<Record<MoveVariant, string>> = {
+                    normal: "attack", altNormal: "attack2", dash: "dashAttack",
+                    upSpecial: "special", downSpecial: "special", ranged: "special",
+                };
+                const sk = slotMap[moveVariant];
+                if (sk) {
+                    const actionOv = charDef.overrideActions[sk] as ActionOverride | undefined;
+                    const vfxId = type === "hit" ? actionOv?.hitVfx : actionOv?.swingVfx;
+                    if (vfxId) {
+                        const o = getVfxById(vfxId);
+                        if (o) return o;
+                    }
+                }
+            }
+            const defaults = getDefaultVfx(fighterKey, slot);
+            const preferred = type === "hit" ? defaults.hit : defaults.swing;
+            if (preferred) {
+                const d = getVfxById(preferred);
+                if (d) return d;
+            }
+            const pool = type === "hit" ? HIT_VFX_BY_MOVE : SWING_VFX_BY_MOVE;
+            return getVfxById(pickMoveVfxId(moveVariant, fighterKey, pool));
+        };
+
+        /** Horizontal-strip spawn from a preloaded image (projectiles / legacy). */
+        const spawnEffect = (
+            image: HTMLImageElement | null,
+            frames: number,
+            hold: number,
+            x: number,
+            y: number,
+            flip: boolean,
+        ) => {
+            if (!image) return;
+            const src = image.currentSrc || image.src || "";
+            const file = src.split("/").pop()?.split("?")[0] || "fx";
+            const id = `strip-${file}-${frames}`;
+            const w = image.naturalWidth || image.width || frames * 100;
+            const h = image.naturalHeight || image.height || 100;
+            const safeFrames = Math.max(1, frames);
+            const vfx = makeStripVfx(id, src, safeFrames, Math.round(w / safeFrames), h);
+            registerVfxImage(vfx, image);
+            spawnVfx(vfx, x, y, flip, hold, vfxDisplayScale(vfx, 120));
         };
 
         const triggerScreenShake = (intensity: number, duration: number) => {
@@ -1826,13 +2187,29 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             hitFlashRef.current = { target, until: performance.now() + duration };
         };
 
-        const drawFighter = (
+        const drawFighterSpriteAt = (
             fighter: FighterRuntime,
-            sprites: Record<AnimationState, RuntimeSprite>
+            sprites: Record<AnimationState, RuntimeSprite>,
+            x: number,
+            y: number,
+            facing: 1 | -1,
+            alpha: number,
+            useIdlePose: boolean,
         ) => {
-            const currentSprite = sprites[fighter.state];
-            const sourceX = fighter.frameIndex * currentSprite.frameWidth;
-            // Scale to ~300px base, then apply per-character non-uniform multipliers
+            // Slide dodge uses frozen idle pose — never the looping roll strip
+            const poseState: AnimationState =
+                useIdlePose || (fighter.state === "dodge" && fighter.moveVariant === "slide")
+                    ? "idle"
+                    : fighter.state === "dodge" && fighter.moveVariant === "rescue"
+                      ? "dodge"
+                      : fighter.state === "dodge"
+                        ? "idle"
+                        : fighter.state;
+            const currentSprite = sprites[poseState] ?? sprites.idle;
+            const safeFrame = useIdlePose || poseState === "idle"
+                ? 0
+                : Math.max(0, Math.min(fighter.frameIndex, Math.max(0, currentSprite.def.frames - 1)));
+            const sourceX = safeFrame * currentSprite.frameWidth;
             const charDef = fighter.id === "p1" ? p1Pick : p2Pick;
             const renderMulX = charDef?.renderScaleX ?? 1;
             const renderMulY = charDef?.renderScaleY ?? 1;
@@ -1840,45 +2217,17 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             const scaleY = baseScale * renderMulY;
             const drawWidth = currentSprite.frameWidth * baseScale * renderMulX;
             const drawHeight = currentSprite.frameHeight * scaleY;
-
-            // Hit flash — tint the fighter white briefly
-            const now = performance.now();
-            const flash = hitFlashRef.current;
-            const isFlashing = flash && flash.target === fighter.id && now < flash.until;
-            const isFallbackDodgeSpin = fighter.state === "dodge" && !charDef?.hasRollAnimation;
-            const dodgeProgress = clamp((now - fighter.stateSince) / DODGE_LOCK_MS, 0, 1);
-            const dodgeSpinDirection = fighter.vx >= 0 ? -1 : 1; // backward flip relative to travel
-            const dodgeSpin = isFallbackDodgeSpin ? dodgeSpinDirection * dodgeProgress * Math.PI * 2 : 0;
-
-            // fighter.y = foot position (on platform)
-            // Draw sprite so bottom visible pixel aligns with fighter.y (ignores transparent strip padding)
-            const drawX = fighter.x - drawWidth / 2;
-            const drawY = fighter.y - drawHeight + currentSprite.bottomPadding * scaleY;
+            const drawX = x - drawWidth / 2;
+            const drawY = y - drawHeight + currentSprite.bottomPadding * scaleY;
 
             ctx.save();
-            if (fighter.facing < 0) {
-                ctx.translate(fighter.x, 0);
+            ctx.globalAlpha = alpha;
+            ctx.imageSmoothingEnabled = false;
+            if (facing < 0) {
+                ctx.translate(x, 0);
                 ctx.scale(-1, 1);
-                ctx.translate(-fighter.x, 0);
+                ctx.translate(-x, 0);
             }
-
-            if (isFallbackDodgeSpin) {
-                const spinCenterY = drawY + drawHeight / 2;
-                ctx.translate(fighter.x, spinCenterY);
-                ctx.rotate(dodgeSpin);
-                ctx.translate(-fighter.x, -spinCenterY);
-            }
-
-            // Invulnerability flicker (respawn protection)
-            if (fighter.invulnUntil > now && Math.floor(now / 80) % 2 === 0) {
-                ctx.globalAlpha = 0.3;
-            }
-
-            // Hurt flash: alternate visibility
-            if (isFlashing && Math.floor(now / 40) % 2 === 0) {
-                ctx.globalAlpha = 0.3;
-            }
-
             ctx.drawImage(
                 currentSprite.image,
                 sourceX, 0,
@@ -1886,9 +2235,58 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 drawX, drawY,
                 drawWidth, drawHeight
             );
-
-            ctx.globalAlpha = 1;
             ctx.restore();
+        };
+
+        const drawAfterImages = (
+            world: WorldState,
+            assets: NonNullable<typeof assetsRef.current>,
+            now: number,
+        ) => {
+            const alive: DodgeAfterImage[] = [];
+            for (const ghost of afterImagesRef.current) {
+                if (now >= ghost.expiresAt) continue;
+                const life = 1 - (now - ghost.createdAt) / (ghost.expiresAt - ghost.createdAt);
+                const alpha = clamp(life, 0, 1) * 0.55;
+                const fighter = ghost.fighterId === "p1" ? world.p1 : world.p2;
+                const sprites = ghost.fighterId === "p1" ? assets.p1 : assets.p2;
+                // Soft fading silhouette (no flashy composite)
+                drawFighterSpriteAt(fighter, sprites, ghost.x, ghost.y, ghost.facing, alpha, true);
+                alive.push(ghost);
+            }
+            afterImagesRef.current = alive;
+        };
+
+        const drawFighter = (
+            fighter: FighterRuntime,
+            sprites: Record<AnimationState, RuntimeSprite>
+        ) => {
+            const now = performance.now();
+            const flash = hitFlashRef.current;
+            const isFlashing = flash && flash.target === fighter.id && now < flash.until;
+            const isSlide = fighter.state === "dodge" && fighter.moveVariant === "slide";
+
+            // Invuln: soft translucent body during slide (no hard flicker / no roll spin)
+            let alpha = 1;
+            if (isSlide && fighter.invulnUntil > now) {
+                alpha = 0.72;
+            } else if (fighter.invulnUntil > now && Math.floor(now / 80) % 2 === 0) {
+                // Respawn flicker only (not slide)
+                alpha = 0.3;
+            }
+            if (isFlashing && Math.floor(now / 40) % 2 === 0) {
+                alpha = 0.3;
+            }
+
+            drawFighterSpriteAt(
+                fighter,
+                sprites,
+                fighter.x,
+                fighter.y,
+                fighter.facing,
+                alpha,
+                isSlide,
+            );
 
             // Counter shield aura
             if (fighter.counterUntil > now) {
@@ -1905,32 +2303,21 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             }
         };
 
-        // ─── Draw active sprite effects ─────────────────────────────
+        // ─── Draw active sprite effects (multi-row grid via drawVfxFrame) ─
         const drawEffects = () => {
             const alive: ActiveEffect[] = [];
             for (const fx of activeEffectsRef.current) {
-                const frameW = fx.image.width / fx.frames;
-                const frameH = fx.image.height;
-                const srcX = fx.frameIndex * frameW;
-                const dW = frameW * fx.scale;
-                const dH = frameH * fx.scale;
-
-                ctx.save();
-                if (fx.flip) {
-                    ctx.translate(fx.x, 0);
-                    ctx.scale(-1, 1);
-                    ctx.translate(-fx.x, 0);
+                // Only draw once image is ready; keep waiting without burning frames
+                const img = getVfxImage(fx.vfx.id);
+                if (img?.complete && img.naturalWidth > 0) {
+                    drawVfxFrame(ctx, fx.vfx, fx.frameIndex, fx.x, fx.y, fx.scale, fx.flip);
+                    fx.frameTick++;
+                    if (fx.frameTick >= fx.hold) {
+                        fx.frameTick = 0;
+                        fx.frameIndex++;
+                    }
                 }
-                ctx.drawImage(fx.image, srcX, 0, frameW, frameH, fx.x - dW / 2, fx.y - dH / 2, dW, dH);
-                ctx.restore();
-
-                // Advance frame
-                fx.frameTick++;
-                if (fx.frameTick >= fx.hold) {
-                    fx.frameTick = 0;
-                    fx.frameIndex++;
-                }
-                if (fx.frameIndex < fx.frames) alive.push(fx);
+                if (fx.frameIndex < fx.vfx.frames) alive.push(fx);
             }
             activeEffectsRef.current = alive;
         };
@@ -2129,6 +2516,9 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 }
                 ctx.restore();
             }
+
+            // Slide afterimages (behind live fighters)
+            drawAfterImages(world, assets, now);
 
             // Fighters
             drawFighter(world.p1, assets.p1);
@@ -2404,6 +2794,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             sprites: Record<AnimationState, RuntimeSprite>,
             now: number
         ): FighterRuntime => {
+            // AA/DD slide: freeze on first idle-like pose (no looping roll anim)
+            if (fighter.state === "dodge" && fighter.moveVariant === "slide") {
+                return { ...fighter, frameIndex: 0, frameTick: 0 };
+            }
+
             const sprite = sprites[fighter.state];
             let nextFrameTick = fighter.frameTick + 1;
             let nextFrame = fighter.frameIndex;
@@ -2439,6 +2834,58 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             const rightPressed = keys.has(controls.right);
             const currentlyGrounded = isOnPlatform(fighter, stage, ignoreOneWayPlatforms) !== null;
 
+            // ── AA/DD slide dodge: ease-out along horizontal path, full i-frames ──
+            if (fighter.state === "dodge" && fighter.moveVariant === "slide" && isLocked) {
+                const elapsed = now - fighter.stateSince;
+                const t = clamp(elapsed / DODGE_DURATION_MS, 0, 1);
+                // Smooth ease-out cubic — fast start, soft stop (no bounce/loop)
+                const ease = 1 - Math.pow(1 - t, 3);
+                const prevX = fighter.x;
+                let x = fighter.dodgeStartX + (fighter.dodgeEndX - fighter.dodgeStartX) * ease;
+                let y = fighter.y;
+                let vy = fighter.vy;
+
+                // Light gravity if airborne so slide doesn't float forever
+                if (!currentlyGrounded) {
+                    vy = fighter.vy + GRAVITY * FALL_GRAVITY_SCALE * 0.5;
+                    y = fighter.y + vy;
+                }
+
+                const floorY = isOnPlatform({ ...fighter, x, y, vy }, stage, ignoreOneWayPlatforms);
+                if (floorY !== null && vy >= 0) {
+                    y = floorY;
+                    vy = 0;
+                }
+
+                // Trail afterimages along the path
+                const lastX = lastAfterImageXRef.current[fighter.id] ?? prevX;
+                if (Math.abs(x - lastX) >= DODGE_AFTERIMAGE_SPACING) {
+                    afterImagesRef.current.push({
+                        id: `ai-${fighter.id}-${now}`,
+                        fighterId: fighter.id,
+                        x: prevX,
+                        y: fighter.y,
+                        facing: fighter.facing,
+                        createdAt: now,
+                        expiresAt: now + DODGE_AFTERIMAGE_LIFE_MS,
+                    });
+                    lastAfterImageXRef.current[fighter.id] = x;
+                }
+
+                // Keep facing stable during slide (don't snap to opponent)
+                return {
+                    ...fighter,
+                    x,
+                    y,
+                    vx: 0,
+                    vy,
+                    frameIndex: 0,
+                    frameTick: 0,
+                    invulnUntil: Math.max(fighter.invulnUntil, fighter.stateLockUntil),
+                    dropThroughUntil: floorY !== null ? 0 : fighter.dropThroughUntil,
+                };
+            }
+
             let vx = fighter.vx;
             if (!isLocked && fighter.hp > 0) {
                 const direction = leftPressed === rightPressed ? 0 : (leftPressed ? -1 : 1);
@@ -2469,7 +2916,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             }
 
             // NO clamping to arena edges — fighters can fall off!
-            // Body collision push — elliptical body collider
+            // Body collision push — elliptical body collider (skip while sliding i-frames)
             const selfEllipse = bodyEllipse({ ...fighter, x, y } as FighterRuntime);
             const opponentEllipse = bodyEllipse(opponent);
             const pushAmount = ellipsePushX(selfEllipse, opponentEllipse);
@@ -2488,6 +2935,9 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 vy,
                 facing,
                 dropThroughUntil: floorY !== null ? 0 : fighter.dropThroughUntil,
+                // Clear slide path once lock ends
+                dodgeStartX: isLocked && fighter.moveVariant === "slide" ? fighter.dodgeStartX : 0,
+                dodgeEndX: isLocked && fighter.moveVariant === "slide" ? fighter.dodgeEndX : 0,
             };
 
             if (next.hp <= 0) {
@@ -2496,11 +2946,11 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
             if (now >= next.stateLockUntil) {
                 if (!grounded && next.vy !== 0) {
-                    next = { ...setState(next, next.vy < 0 ? "jump" : "fall", now), moveVariant: "none", attackHasConnected: false };
+                    next = { ...setState(next, next.vy < 0 ? "jump" : "fall", now), moveVariant: "none", attackHasConnected: false, dodgeStartX: 0, dodgeEndX: 0 };
                 } else if (Math.abs(next.vx) > 1.4) {
-                    next = { ...setState(next, "run", now), moveVariant: "none", attackHasConnected: false };
+                    next = { ...setState(next, "run", now), moveVariant: "none", attackHasConnected: false, dodgeStartX: 0, dodgeEndX: 0 };
                 } else {
-                    next = { ...setState(next, "idle", now), moveVariant: "none", attackHasConnected: false };
+                    next = { ...setState(next, "idle", now), moveVariant: "none", attackHasConnected: false, dodgeStartX: 0, dodgeEndX: 0 };
                 }
             }
 
@@ -2565,29 +3015,25 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             // Sound
             playSound(headHit ? "hit_head" : attacker.moveVariant === "dash" ? "hit_heavy" : "hit_light");
 
-            // Spawn attack effect sprite at the hit point
-            const fxAssets = assetsRef.current;
-            const effectImg = fxAssets ? (attacker.id === "p1" ? fxAssets.p1Effect : fxAssets.p2Effect) : null;
-            const effectDef = attacker.id === "p1" ? p1Pick?.attackEffect : p2Pick?.attackEffect;
-            if (effectImg && effectDef) {
-                spawnEffect(effectImg, effectDef.frames, effectDef.hold,
-                    defender.x, defender.y - defender.height * 0.5, attacker.facing < 0);
-            }
+            // Character attack strip + hit VFX at impact point
+            const atkChar = attacker.id === "p1" ? p1Pick : p2Pick;
+            const hitX = defender.x;
+            const hitY = defender.y - defender.height * 0.5;
+            spawnCharAttackEffect(atkChar, hitX, hitY, attacker.facing < 0);
 
-            // Move-specific VFX — use per-character defaults from defaultVfx.ts
-            const fighterKey = attacker.id === "p1" ? (p1Pick?.id ?? "p1") : (p2Pick?.id ?? "p2");
-            const moveSlot = attacker.moveVariant === "dash" ? "dashAttack" : attacker.moveVariant === "upSpecial" || attacker.moveVariant === "downSpecial" ? "special" : attacker.moveVariant === "altNormal" ? "attack2" : "attack";
-            const charDefaults = getDefaultVfx(fighterKey, moveSlot);
-            const smearVfx = getVfxById(charDefaults.swing ?? pickMoveVfxId(attacker.moveVariant, fighterKey, SWING_VFX_BY_MOVE));
-            const hitVfx = getVfxById(charDefaults.hit ?? pickMoveVfxId(attacker.moveVariant, fighterKey, HIT_VFX_BY_MOVE));
-            if (smearVfx) {
-                const smearImg = getVfxImage(smearVfx.id);
-                if (smearImg) spawnEffect(smearImg, smearVfx.frames, 2, attacker.x + attacker.facing * 40, attacker.y - attacker.height * 0.5, attacker.facing < 0);
-            }
-            if (hitVfx) {
-                const hitImg = getVfxImage(hitVfx.id);
-                if (hitImg) spawnEffect(hitImg, hitVfx.frames, 2, defender.x, defender.y - defender.height * 0.5, false);
-            }
+            const fighterKey = atkChar?.id ?? attacker.id;
+            const hitVfx = resolveCombatVfx(fighterKey, attacker.moveVariant, "hit");
+            spawnVfx(hitVfx, hitX, hitY, false, 2, hitVfx ? vfxDisplayScale(hitVfx, 100) : undefined);
+            // Swing smear at attacker weapon arc (if not already played at startup)
+            const swingVfx = resolveCombatVfx(fighterKey, attacker.moveVariant, "swing");
+            spawnVfx(
+                swingVfx,
+                attacker.x + attacker.facing * 40,
+                attacker.y - attacker.height * 0.5,
+                attacker.facing < 0,
+                2,
+                swingVfx ? vfxDisplayScale(swingVfx, 130) : undefined,
+            );
 
             // Screen shake and hit flash — stronger on headshots
             const baseShake = attacker.moveVariant === "dash" ? 11 : attacker.moveVariant === "upSpecial" ? 12 : 8;
@@ -2628,17 +3074,9 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             }
 
             const result = applyDamage(defender, attacker, Math.round(attacker.moveSet.baseDamage * 1.1), now);
-            const fighterKey = attacker.id === "p1" ? (p1Pick?.id ?? "p1") : (p2Pick?.id ?? "p2");
-            const swingVfx = getVfxById(pickMoveVfxId("rescue", fighterKey, SWING_VFX_BY_MOVE));
-            const hitVfx = getVfxById(pickMoveVfxId("rescue", fighterKey, HIT_VFX_BY_MOVE));
-            if (swingVfx) {
-                const img = getVfxImage(swingVfx.id);
-                if (img) spawnEffect(img, swingVfx.frames, 2, attacker.x, attacker.y - attacker.height * 0.5, attacker.facing < 0);
-            }
-            if (hitVfx) {
-                const img = getVfxImage(hitVfx.id);
-                if (img) spawnEffect(img, hitVfx.frames, 2, defender.x, defender.y - defender.height * 0.5, false);
-            }
+            const fighterKey = (attacker.id === "p1" ? p1Pick?.id : p2Pick?.id) ?? attacker.id;
+            spawnVfx(resolveCombatVfx(fighterKey, "rescue", "swing"), attacker.x, attacker.y - attacker.height * 0.5, attacker.facing < 0);
+            spawnVfx(resolveCombatVfx(fighterKey, "rescue", "hit"), defender.x, defender.y - defender.height * 0.5, false);
             triggerScreenShake(13, 180);
             triggerHitFlash(defender.id as FighterId, 120);
             return {
@@ -2665,10 +3103,12 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     const result = applyDamage(def, atk, atk.moveSet.superDamage, now);
                     if (atkId === "p1") { world.p1 = result.attacker; world.p2 = result.target; }
                     else { world.p2 = result.attacker; world.p1 = result.target; }
-                    const fxA = assetsRef.current;
-                    const fxImg = fxA ? (atkId === "p1" ? fxA.p1Effect : fxA.p2Effect) : null;
-                    const fxDef = atkId === "p1" ? p1Pick?.attackEffect : p2Pick?.attackEffect;
-                    if (fxImg && fxDef) spawnEffect(fxImg, fxDef.frames, fxDef.hold, def.x, def.y - def.height * 0.5, atk.facing < 0);
+                    const superChar = atkId === "p1" ? p1Pick : p2Pick;
+                    spawnCharAttackEffect(superChar, def.x, def.y - def.height * 0.5, atk.facing < 0);
+                    spawnVfx(
+                        resolveCombatVfx(superChar?.id ?? atkId, "upSpecial", "hit"),
+                        def.x, def.y - def.height * 0.5, false, 2,
+                    );
                     triggerScreenShake(18, 400);
                     triggerHitFlash(def.id as FighterId, 200);
                 }
@@ -2756,11 +3196,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                                 vx: updated.vx * 0.9,
                                 bouncesRemaining: updated.bouncesRemaining - 1,
                             };
-                            const bounceVfx = getVfxById("waterSplash") ?? getVfxById("dustCloud");
-                            if (bounceVfx) {
-                                const bounceImg = getVfxImage(bounceVfx.id);
-                                if (bounceImg) spawnEffect(bounceImg, bounceVfx.frames, 2, updated.x, floorY, false);
-                            }
+                            spawnVfx(getVfxById("waterSplash") ?? getVfxById("dustCloud"), updated.x, floorY, false, 2);
                             triggerScreenShake(5, 80);
                             playSound("bounce");
                         } else {
@@ -2782,11 +3218,13 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                                     triggerHitFlash(t.ref, 100);
                                 }
                             }
-                            const endVfx = getVfxById(updated.hitVfxId) ?? getVfxById("explosionSmall");
-                            if (endVfx) {
-                                const endImg = getVfxImage(endVfx.id);
-                                if (endImg) spawnEffect(endImg, endVfx.frames, 2, updated.x, floorY - 8, false);
-                            }
+                            spawnVfx(
+                                getVfxById(updated.hitVfxId) ?? getVfxById("explosionSmall"),
+                                updated.x,
+                                floorY - 8,
+                                false,
+                                2,
+                            );
                             triggerScreenShake(12, 160);
                             continue;
                         }
@@ -2841,17 +3279,20 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     }
 
                     // Projectile hit effects
-                    const ownerEffect = updated.owner === "p1" ? assets.p1Effect : assets.p2Effect;
-                    const ownerDef = updated.owner === "p1" ? p1Pick?.attackEffect : p2Pick?.attackEffect;
-                    if (ownerEffect && ownerDef) {
-                        spawnEffect(ownerEffect, ownerDef.frames, ownerDef.hold,
-                            hitTarget.x, hitTarget.y - hitTarget.height * 0.5, updated.vx < 0);
-                    }
-                    const projHitVfx = getVfxById(updated.hitVfxId);
-                    if (projHitVfx) {
-                        const projHitImg = getVfxImage(projHitVfx.id);
-                        if (projHitImg) spawnEffect(projHitImg, projHitVfx.frames, 2, hitTarget.x, hitTarget.y - hitTarget.height * 0.5, false);
-                    }
+                    const ownerChar = updated.owner === "p1" ? p1Pick : p2Pick;
+                    spawnCharAttackEffect(
+                        ownerChar,
+                        hitTarget.x,
+                        hitTarget.y - hitTarget.height * 0.5,
+                        updated.vx < 0,
+                    );
+                    spawnVfx(
+                        getVfxById(updated.hitVfxId),
+                        hitTarget.x,
+                        hitTarget.y - hitTarget.height * 0.5,
+                        false,
+                        2,
+                    );
                     triggerScreenShake(8, 150);
                     triggerHitFlash(hitTarget.id as FighterId, 80);
 
@@ -3688,7 +4129,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                         </div>
                         <div className="text-sm text-white/80 space-y-1">
                             <div>A/D: move · W: jump</div>
-                            <div className="text-emerald-300">AA / DD: dodge roll (ground + air quick dodge)</div>
+                            <div className="text-emerald-300">AA / DD: slide dodge 3× path (afterimages + full i-frames)</div>
                             <div className="text-cyan-300">SS: drop through floating platforms</div>
                             <div>Q: melee 1 · E: melee 2 (ground)</div>
                             <div className="text-sky-300">Air E: forward projectile · Air E+S: down-angle projectile</div>
@@ -3709,7 +4150,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                         ) : (
                             <div className="text-sm text-white/80 space-y-1">
                                 <div>Arrows: move + jump</div>
-                                <div className="text-emerald-300">Double-tap Left/Right: dodge roll</div>
+                                <div className="text-emerald-300">Double-tap Left/Right: slide dodge (3× distance, i-frames)</div>
                                 <div className="text-cyan-300">Double-tap Down: drop through floating platforms</div>
                                 <div>/: melee 1 · .: melee 2</div>
                                 <div>;: ranged · ': super</div>

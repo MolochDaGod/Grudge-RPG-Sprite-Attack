@@ -6,7 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { PuterAuthProvider } from "@/contexts/PuterAuthContext";
 import { GrudgeAccountProvider } from "@/contexts/GrudgeAccountContext";
-import { consumeGrudgeAuth, requireGrudgeAuth } from "@/lib/grudgeAuth";
+import { consumeGrudgeAuth, consumeGrudgeAuthAsync, requireGrudgeAuth } from "@/lib/grudgeAuth";
 import { isAuthenticated } from "@/lib/grudgeBackend";
 import GrudgeFighter2D from "@/pages/GrudgeFighter2D";
 import ToonAdmin from "@/pages/ToonAdmin";
@@ -68,13 +68,25 @@ function GameApp() {
   });
 
   useEffect(() => {
-    if (consumeGrudgeAuth() || isAuthenticated()) {
-      setAuthed(true);
-      return;
-    }
-    if (route !== "auth/callback") {
-      requireGrudgeAuth();
-    }
+    let cancelled = false;
+    (async () => {
+      try {
+        await consumeGrudgeAuthAsync();
+      } catch {
+        consumeGrudgeAuth();
+      }
+      if (cancelled) return;
+      if (isAuthenticated()) {
+        setAuthed(true);
+        return;
+      }
+      if (route !== "auth/callback") {
+        requireGrudgeAuth();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [route]);
 
   useEffect(() => {

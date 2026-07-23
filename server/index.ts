@@ -7,7 +7,13 @@ import { createServer } from "http";
 import path from "path";
 import { hasDb } from "./db";
 import { registerGrudgeBackendProxy } from "./grudgeProxy";
-import { GRUDGE_GAME_DATA_API, GRUDGE_PVP_URL, PRODUCTION_CORS_ORIGINS } from "./fleetConfig";
+import {
+  GRUDGE_GAME_DATA_API,
+  GRUDGE_PVP_URL,
+  GRUDGE_AUTH_GATEWAY,
+  PRODUCTION_CORS_ORIGINS,
+  isAllowedCorsOrigin,
+} from "./fleetConfig";
 
 const app = express();
 const httpServer = createServer(app);
@@ -28,7 +34,9 @@ app.use(helmet({
         "https://*.up.railway.app",
         GRUDGE_GAME_DATA_API,
         GRUDGE_PVP_URL,
-        "https://api.grudge-studio.com",
+        GRUDGE_AUTH_GATEWAY,
+        "https://objectstore.grudge-studio.com",
+        "https://assets.grudge-studio.com",
         "https://js.puter.com",
         "https://puter.com",
         "wss://*.grudge-studio.com",
@@ -41,7 +49,7 @@ app.use(helmet({
       workerSrc: ["'self'", "blob:"],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
-      formAction: ["'self'"],
+      formAction: ["'self'", GRUDGE_AUTH_GATEWAY],
       frameAncestors: ["'self'"],
       upgradeInsecureRequests: [],
     },
@@ -51,18 +59,14 @@ app.use(helmet({
 }));
 
 // ── Global CORS for all /api routes ──────────────────────────────
-const defaultCors =
-  process.env.NODE_ENV === "production"
-    ? PRODUCTION_CORS_ORIGINS.join(",")
-    : ["http://localhost:5000", ...PRODUCTION_CORS_ORIGINS].join(",");
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || defaultCors)
+// Explicit list + water + *.grudge-studio.com + *.vercel.app (fleet satellite pattern)
+const CORS_EXTRA = (process.env.CORS_ORIGINS || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
 app.use('/api', cors({
   origin: (origin, cb) => {
-    // Allow requests with no origin (curl, server-to-server) and listed origins
-    if (!origin || CORS_ORIGINS.includes('*') || CORS_ORIGINS.includes(origin)) {
+    if (!origin || CORS_EXTRA.includes("*") || CORS_EXTRA.includes(origin) || isAllowedCorsOrigin(origin)) {
       cb(null, true);
     } else {
       cb(null, false);
@@ -70,7 +74,7 @@ app.use('/api', cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-token', 'x-config-version'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Session-Token', 'x-admin-token', 'x-config-version'],
 }));
 
 // ── Health check (Railway / Coolify) ─────────────────────────────
