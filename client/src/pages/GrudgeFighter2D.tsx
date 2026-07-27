@@ -15,8 +15,26 @@ import {
     resolveAttackEffectVfx,
     registerVfxImage,
     makeStripVfx,
+    vfxPreferredComposite,
     type VfxDef,
 } from "@/lib/vfxLibrary";
+import {
+    ANIM_BLEND_MS,
+    FIGHTER_MOVE_TUNING,
+    beginAnimBlend,
+    createMotionTrail,
+    drawMotionTrail,
+    drawRotatedStripFrame,
+    easeOutCubic,
+    expApproach,
+    lerp,
+    pushTrailSample,
+    tickAnimBlend,
+    velocityAngle,
+    velocityStretch,
+    type AnimBlendState,
+    type MotionTrail,
+} from "@/lib/fighter2dMotion";
 import { getFaction, type FactionId } from "@/lib/factions";
 import { playSound, preloadSounds as preloadGameSounds } from "@/lib/gameSounds";
 import { getDefaultVfx } from "@/lib/defaultVfx";
@@ -107,6 +125,8 @@ interface FighterRuntime {
     dodgeStartX: number;
     /** AA/DD slide dodge — end X of the path (front/behind along the line) */
     dodgeEndX: number;
+    /** Short crossfade from previous pose (idle↔run, attack startup) */
+    animBlend: AnimBlendState | null;
 }
 
 /** Fading silhouette ghosts left during AA/DD slide */
@@ -136,6 +156,10 @@ interface Projectile {
     radius: number;
     damage: number;
     expiresAt: number;
+    /** Motion-blur trail samples (blurred ghost path) */
+    trail: MotionTrail;
+    /** Magic projectiles use additive glow; physical arrows stretch less */
+    isMagic: boolean;
 }
 
 interface WorldState {
@@ -263,11 +287,12 @@ function updateCamera(cam: CameraState, p1: FighterRuntime, p2: FighterRuntime):
     const targetZoom = clamp(VIEWPORT_W / maxSpan, 0.4, 0.95);
     const targetX = midX - (VIEWPORT_W / targetZoom) / 2;
     const targetY = midY - (VIEWPORT_H / targetZoom) / 2 - 60;
-    const lerp = 0.06;
+    // Slightly snappier follow so directional bursts stay framed
+    const camLerp = 0.09;
     return {
-        x: cam.x + (targetX - cam.x) * lerp,
-        y: cam.y + (targetY - cam.y) * lerp,
-        zoom: cam.zoom + (targetZoom - cam.zoom) * lerp,
+        x: cam.x + (targetX - cam.x) * camLerp,
+        y: cam.y + (targetY - cam.y) * camLerp,
+        zoom: cam.zoom + (targetZoom - cam.zoom) * camLerp,
     };
 }
 
@@ -363,6 +388,9 @@ interface ActiveEffect {
     frameTick: number;
     scale: number;
     flip: boolean;
+    /** Additive skill pop vs normal dust */
+    additive?: boolean;
+    glowColor?: string;
 }
 
 // Convert GRUDA roster data into CharacterDef for the fighter engine
@@ -527,6 +555,13 @@ function approach(value: number, target: number, delta: number): number {
     return target;
 }
 
+function blendDurationForState(state: AnimationState): number {
+    if (state === "attack" || state === "attack2" || state === "special") return ANIM_BLEND_MS.attack;
+    if (state === "takeHit" || state === "death") return ANIM_BLEND_MS.hit;
+    if (state === "dodge") return ANIM_BLEND_MS.none;
+    return ANIM_BLEND_MS.locomotion;
+}
+
 const SWING_VFX_BY_MOVE: Record<MoveVariant, string[]> = {
     none: ["smearH1"],
     normal: ["smearH1", "smearH2", "slashRedMd"],
@@ -605,6 +640,7 @@ function createInitialFighter(id: FighterId, charDef: CharacterDef, stage: Stage
         moveSet: charDef.moveSet,
         dodgeStartX: 0,
         dodgeEndX: 0,
+        animBlend: null,
     };
 }
 
@@ -634,6 +670,7 @@ function respawnFighter(fighter: FighterRuntime, stage: StageDefinition): Fighte
         rescueUsed: false,
         dodgeStartX: 0,
         dodgeEndX: 0,
+        animBlend: null,
     };
 }
 
@@ -776,12 +813,18 @@ function resolveFighterSeparation(a: FighterRuntime, b: FighterRuntime): { a: Fi
 
 function setState(fighter: FighterRuntime, state: AnimationState, now: number): FighterRuntime {
     if (fighter.state === state) return fighter;
+    const duration = blendDurationForState(state);
+    const animBlend =
+        duration > 0
+            ? beginAnimBlend(fighter.state, fighter.frameIndex, duration, now)
+            : null;
     return {
         ...fighter,
         state,
         stateSince: now,
         frameIndex: 0,
         frameTick: 0,
+        animBlend,
     };
 }
 
@@ -1336,6 +1379,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 frameTick: 0,
                 scale: vfxDisplayScale(swingVfx, 130),
                 flip: next.facing < 0,
+                additive: vfxPreferredComposite(swingVfx) !== "source-over",
+                glowColor: "rgba(255,200,140,0.45)",
             });
         }
 
@@ -1378,6 +1423,14 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 vy = 4.5;
                 hasGravity = true;
             }
+            const trail = createMotionTrail(
+                FIGHTER_MOVE_TUNING.projTrailSamples,
+                FIGHTER_MOVE_TUNING.projTrailAgeMs,
+                FIGHTER_MOVE_TUNING.projTrailSpacing,
+            );
+            const spawnX = actor.x + actor.facing * 40;
+            const spawnY = actor.y - actor.height * 0.45;
+            pushTrailSample(trail, spawnX, spawnY, velocityAngle(vx, vy), now);
             const projectile: Projectile = {
                 id: `${fighterId}-${now}`,
                 owner: fighterId,
@@ -1386,15 +1439,38 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 hitVfxId: getCharVfx(charDef ?? null, "ranged", fighterKey, "hit"),
                 isBouncingBomb: kind === "airDown",
                 bouncesRemaining: kind === "airDown" ? 2 : 0,
-                x: actor.x + actor.facing * 40,
-                y: actor.y - actor.height * 0.45,
+                x: spawnX,
+                y: spawnY,
                 vx,
                 vy,
                 hasGravity,
                 radius: 14,
                 damage: actor.moveSet.projectileDamage,
                 expiresAt: now + 2200,
+                trail,
+                isMagic: !isPhysical,
             };
+            // Muzzle / cast burst from 2D library at fire
+            const muzzle =
+                getVfxById(projectile.swingVfxId) ??
+                getVfxById(isPhysical ? "slash_ranged" : "electric_spark") ??
+                getVfxById("sparkBurst");
+            if (muzzle) {
+                getVfxImage(muzzle.id);
+                activeEffectsRef.current.push({
+                    id: `fx-muzzle-${now}`,
+                    x: spawnX,
+                    y: spawnY,
+                    vfx: muzzle,
+                    hold: 2,
+                    frameIndex: 0,
+                    frameTick: 0,
+                    scale: vfxDisplayScale(muzzle, isPhysical ? 90 : 110),
+                    flip: actor.facing < 0,
+                    additive: !isPhysical,
+                    glowColor: isPhysical ? "rgba(255,220,120,0.55)" : "rgba(140,220,255,0.65)",
+                });
+            }
 
             const next = setState(
                 {
@@ -1646,6 +1722,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 frameTick: 0,
                 scale: vfxDisplayScale(swingVfx, 120),
                 flip: next.facing < 0,
+                additive: vfxPreferredComposite(swingVfx) !== "source-over",
+                glowColor: "rgba(255,180,80,0.4)",
             });
         }
         if (fighterId === "p1") world.p1 = next; else world.p2 = next;
@@ -2081,6 +2159,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         ) => {
             if (!vfx) return;
             getVfxImage(vfx.id);
+            const additive = vfxPreferredComposite(vfx) !== "source-over";
             activeEffectsRef.current.push({
                 id: `fx-${performance.now()}-${Math.random()}`,
                 x,
@@ -2091,6 +2170,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 frameTick: 0,
                 scale: scale ?? vfxDisplayScale(vfx, 120),
                 flip,
+                additive,
+                glowColor: additive ? "rgba(180,220,255,0.4)" : undefined,
             });
         };
 
@@ -2187,6 +2268,44 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             hitFlashRef.current = { target, until: performance.now() + duration };
         };
 
+        const drawOnePose = (
+            sprite: RuntimeSprite,
+            frameIndex: number,
+            x: number,
+            y: number,
+            facing: 1 | -1,
+            alpha: number,
+            charDef: CharacterDef | null,
+        ) => {
+            const safeFrame = Math.max(0, Math.min(frameIndex, Math.max(0, sprite.def.frames - 1)));
+            const sourceX = safeFrame * sprite.frameWidth;
+            const renderMulX = charDef?.renderScaleX ?? 1;
+            const renderMulY = charDef?.renderScaleY ?? 1;
+            const baseScale = 300 / sprite.frameHeight;
+            const scaleY = baseScale * renderMulY;
+            const drawWidth = sprite.frameWidth * baseScale * renderMulX;
+            const drawHeight = sprite.frameHeight * scaleY;
+            const drawX = x - drawWidth / 2;
+            const drawY = y - drawHeight + sprite.bottomPadding * scaleY;
+
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.imageSmoothingEnabled = false;
+            if (facing < 0) {
+                ctx.translate(x, 0);
+                ctx.scale(-1, 1);
+                ctx.translate(-x, 0);
+            }
+            ctx.drawImage(
+                sprite.image,
+                sourceX, 0,
+                sprite.frameWidth, sprite.frameHeight,
+                drawX, drawY,
+                drawWidth, drawHeight
+            );
+            ctx.restore();
+        };
+
         const drawFighterSpriteAt = (
             fighter: FighterRuntime,
             sprites: Record<AnimationState, RuntimeSprite>,
@@ -2195,6 +2314,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             facing: 1 | -1,
             alpha: number,
             useIdlePose: boolean,
+            nowMs?: number,
         ) => {
             // Slide dodge uses frozen idle pose — never the looping roll strip
             const poseState: AnimationState =
@@ -2209,33 +2329,22 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             const safeFrame = useIdlePose || poseState === "idle"
                 ? 0
                 : Math.max(0, Math.min(fighter.frameIndex, Math.max(0, currentSprite.def.frames - 1)));
-            const sourceX = safeFrame * currentSprite.frameWidth;
             const charDef = fighter.id === "p1" ? p1Pick : p2Pick;
-            const renderMulX = charDef?.renderScaleX ?? 1;
-            const renderMulY = charDef?.renderScaleY ?? 1;
-            const baseScale = 300 / currentSprite.frameHeight;
-            const scaleY = baseScale * renderMulY;
-            const drawWidth = currentSprite.frameWidth * baseScale * renderMulX;
-            const drawHeight = currentSprite.frameHeight * scaleY;
-            const drawX = x - drawWidth / 2;
-            const drawY = y - drawHeight + currentSprite.bottomPadding * scaleY;
+            const blend = nowMs != null ? tickAnimBlend(fighter.animBlend, nowMs) : fighter.animBlend;
 
-            ctx.save();
-            ctx.globalAlpha = alpha;
-            ctx.imageSmoothingEnabled = false;
-            if (facing < 0) {
-                ctx.translate(x, 0);
-                ctx.scale(-1, 1);
-                ctx.translate(-x, 0);
+            // Crossfade previous pose under current for smoother state changes
+            if (blend && blend.weight < 1 && !useIdlePose) {
+                const prevKey = blend.prevState as AnimationState;
+                const prevSprite = sprites[prevKey] ?? sprites.idle;
+                const prevAlpha = alpha * (1 - blend.weight) * 0.85;
+                if (prevAlpha > 0.04) {
+                    drawOnePose(prevSprite, blend.prevFrame, x, y, facing, prevAlpha, charDef);
+                }
+                drawOnePose(currentSprite, safeFrame, x, y, facing, alpha * Math.max(0.35, blend.weight), charDef);
+                return;
             }
-            ctx.drawImage(
-                currentSprite.image,
-                sourceX, 0,
-                currentSprite.frameWidth, currentSprite.frameHeight,
-                drawX, drawY,
-                drawWidth, drawHeight
-            );
-            ctx.restore();
+
+            drawOnePose(currentSprite, safeFrame, x, y, facing, alpha, charDef);
         };
 
         const drawAfterImages = (
@@ -2247,10 +2356,17 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             for (const ghost of afterImagesRef.current) {
                 if (now >= ghost.expiresAt) continue;
                 const life = 1 - (now - ghost.createdAt) / (ghost.expiresAt - ghost.createdAt);
-                const alpha = clamp(life, 0, 1) * 0.55;
+                const alpha = clamp(life, 0, 1) * 0.6;
                 const fighter = ghost.fighterId === "p1" ? world.p1 : world.p2;
                 const sprites = ghost.fighterId === "p1" ? assets.p1 : assets.p2;
-                // Soft fading silhouette (no flashy composite)
+                const tint = ghost.fighterId === "p1" ? "rgba(255,210,100,0.95)" : "rgba(120,220,255,0.95)";
+                // Soft screen-blend glow under the silhouette, then body at fade alpha
+                ctx.save();
+                ctx.globalCompositeOperation = "screen";
+                ctx.shadowColor = tint;
+                ctx.shadowBlur = 14;
+                drawFighterSpriteAt(fighter, sprites, ghost.x, ghost.y, ghost.facing, alpha * 0.85, true);
+                ctx.restore();
                 drawFighterSpriteAt(fighter, sprites, ghost.x, ghost.y, ghost.facing, alpha, true);
                 alive.push(ghost);
             }
@@ -2286,6 +2402,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 fighter.facing,
                 alpha,
                 isSlide,
+                now,
             );
 
             // Counter shield aura
@@ -2310,7 +2427,18 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 // Only draw once image is ready; keep waiting without burning frames
                 const img = getVfxImage(fx.vfx.id);
                 if (img?.complete && img.naturalWidth > 0) {
-                    drawVfxFrame(ctx, fx.vfx, fx.frameIndex, fx.x, fx.y, fx.scale, fx.flip);
+                    const composite = fx.additive
+                        ? FIGHTER_MOVE_TUNING.skillBlend
+                        : vfxPreferredComposite(fx.vfx);
+                    // Fade-out last frames for softer skill endings
+                    const life = 1 - fx.frameIndex / Math.max(1, fx.vfx.frames);
+                    const alpha = 0.55 + 0.45 * life;
+                    drawVfxFrame(ctx, fx.vfx, fx.frameIndex, fx.x, fx.y, fx.scale, fx.flip, {
+                        alpha,
+                        composite,
+                        glowColor: fx.glowColor,
+                        glowRadius: Math.max(fx.vfx.frameW, fx.vfx.frameH) * fx.scale * 0.4,
+                    });
                     fx.frameTick++;
                     if (fx.frameTick >= fx.hold) {
                         fx.frameTick = 0;
@@ -2625,39 +2753,103 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 }
             }
 
-            // Projectiles — use sprite images if available
+            // Projectiles — blurred motion trails + velocity stretch from sprite library
             for (const projectile of world.projectiles) {
                 const projImg = projectile.owner === "p1" ? assets.p1Projectile : assets.p2Projectile;
                 const projPick = projectile.owner === "p1" ? p1Pick : p2Pick;
-                const projFrames = projPick?.projectileFrames || 1;
+                const projFrames = Math.max(1, projPick?.projectileFrames || 1);
+                const speed = Math.hypot(projectile.vx, projectile.vy);
+                const angle = velocityAngle(projectile.vx, projectile.vy);
+                const stretch = velocityStretch(speed, 1, projectile.isMagic ? 1.65 : 1.4, 12);
+                const size = projectile.isMagic ? 64 : 56;
+                const glow =
+                    projectile.owner === "p1"
+                        ? projectile.isMagic ? "rgba(255,180,80,0.85)" : "rgba(255,213,106,0.7)"
+                        : projectile.isMagic ? "rgba(120,200,255,0.85)" : "rgba(141,231,255,0.7)";
+                const frameIdx = projFrames > 1 ? Math.floor((now / 50) % projFrames) : 0;
 
-                if (projImg && projImg.complete) {
-                    const frameW = projImg.width / projFrames;
-                    const frameH = projImg.height;
-                    // Animate projectile frames based on time
-                    const frameIdx = projFrames > 1 ? Math.floor((now / 60) % projFrames) : 0;
-                    const size = 60;
-                    ctx.save();
-                    if (projectile.vx < 0) {
-                        ctx.translate(projectile.x, 0);
-                        ctx.scale(-1, 1);
-                        ctx.translate(-projectile.x, 0);
+                // Motion-blur ghost trail (older samples fade + shrink)
+                if (projImg?.complete) {
+                    drawMotionTrail(
+                        ctx,
+                        projectile.trail,
+                        now,
+                        (tx, ty, tAngle, tAlpha, scaleMul) => {
+                            drawRotatedStripFrame(
+                                ctx,
+                                projImg,
+                                frameIdx,
+                                projFrames,
+                                tx,
+                                ty,
+                                size * scaleMul,
+                                tAngle,
+                                stretch.sx,
+                                stretch.sy,
+                                tAlpha,
+                                false,
+                            );
+                        },
+                        {
+                            size,
+                            peakAlpha: projectile.isMagic ? 0.55 : 0.4,
+                            blend: projectile.isMagic ? "lighter" : "screen",
+                            glowColor: glow,
+                            glowRadius: size * 0.7,
+                        },
+                    );
+                    // Live head (sharp, stretched, velocity-aligned)
+                    drawRotatedStripFrame(
+                        ctx,
+                        projImg,
+                        frameIdx,
+                        projFrames,
+                        projectile.x,
+                        projectile.y,
+                        size,
+                        angle,
+                        stretch.sx,
+                        stretch.sy,
+                        1,
+                        false,
+                    );
+                    // Soft additive halo on magic bolts
+                    if (projectile.isMagic) {
+                        ctx.save();
+                        ctx.globalCompositeOperation = "lighter";
+                        ctx.globalAlpha = 0.45;
+                        const halo = ctx.createRadialGradient(
+                            projectile.x, projectile.y, 2,
+                            projectile.x, projectile.y, size * 0.55,
+                        );
+                        halo.addColorStop(0, glow);
+                        halo.addColorStop(1, "transparent");
+                        ctx.fillStyle = halo;
+                        ctx.beginPath();
+                        ctx.arc(projectile.x, projectile.y, size * 0.55, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.restore();
                     }
-                    ctx.drawImage(projImg, frameIdx * frameW, 0, frameW, frameH, projectile.x - size / 2, projectile.y - size / 2, size, size);
-                    ctx.restore();
-
-                    // Glow trail behind projectile
-                    ctx.save();
-                    ctx.globalAlpha = 0.35;
-                    const trailGrad = ctx.createRadialGradient(projectile.x, projectile.y, 2, projectile.x, projectile.y, 28);
-                    trailGrad.addColorStop(0, projectile.owner === "p1" ? "#ffd56a" : "#8de7ff");
-                    trailGrad.addColorStop(1, "transparent");
-                    ctx.fillStyle = trailGrad;
-                    ctx.fillRect(projectile.x - 30, projectile.y - 30, 60, 60);
-                    ctx.restore();
                 } else {
-                    // Fallback: gradient orb
-                    const grad = ctx.createRadialGradient(projectile.x, projectile.y, 2, projectile.x, projectile.y, projectile.radius);
+                    // Fallback: blurred orb trail
+                    for (const s of projectile.trail.samples) {
+                        const life = 1 - clamp((now - s.at) / Math.max(1, projectile.trail.maxAgeMs), 0, 1);
+                        ctx.save();
+                        ctx.globalAlpha = 0.35 * life;
+                        ctx.globalCompositeOperation = "lighter";
+                        const g = ctx.createRadialGradient(s.x, s.y, 1, s.x, s.y, projectile.radius * 1.6);
+                        g.addColorStop(0, glow);
+                        g.addColorStop(1, "transparent");
+                        ctx.fillStyle = g;
+                        ctx.beginPath();
+                        ctx.arc(s.x, s.y, projectile.radius * 1.6 * life, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.restore();
+                    }
+                    const grad = ctx.createRadialGradient(
+                        projectile.x, projectile.y, 2,
+                        projectile.x, projectile.y, projectile.radius,
+                    );
                     grad.addColorStop(0, projectile.owner === "p1" ? "#ffd56a" : "#8de7ff");
                     grad.addColorStop(1, "rgba(255,255,255,0.1)");
                     ctx.fillStyle = grad;
@@ -2794,16 +2986,31 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             sprites: Record<AnimationState, RuntimeSprite>,
             now: number
         ): FighterRuntime => {
+            const animBlend = tickAnimBlend(fighter.animBlend, now);
+
             // AA/DD slide: freeze on first idle-like pose (no looping roll anim)
             if (fighter.state === "dodge" && fighter.moveVariant === "slide") {
-                return { ...fighter, frameIndex: 0, frameTick: 0 };
+                return { ...fighter, frameIndex: 0, frameTick: 0, animBlend };
             }
 
             const sprite = sprites[fighter.state];
+            // Run anim speed scales with velocity for snappier directional feel
+            let hold = sprite.def.hold;
+            if (fighter.state === "run") {
+                const maxSpd = Math.max(1, (fighter.moveSet?.runSpeed ?? 5) * SPEED_SCALE * GROUND_SPEED_MULT);
+                const speedT = clamp(Math.abs(fighter.vx) / maxSpd, 0, 1.4);
+                const mul = lerp(
+                    FIGHTER_MOVE_TUNING.runFrameSpeedMin,
+                    FIGHTER_MOVE_TUNING.runFrameSpeedMax,
+                    speedT,
+                );
+                hold = Math.max(1, Math.round(hold / mul));
+            }
+
             let nextFrameTick = fighter.frameTick + 1;
             let nextFrame = fighter.frameIndex;
 
-            if (nextFrameTick >= sprite.def.hold) {
+            if (nextFrameTick >= hold) {
                 nextFrameTick = 0;
                 nextFrame += 1;
 
@@ -2816,6 +3023,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 ...fighter,
                 frameTick: nextFrameTick,
                 frameIndex: nextFrame,
+                animBlend,
             };
         };
 
@@ -2839,7 +3047,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 const elapsed = now - fighter.stateSince;
                 const t = clamp(elapsed / DODGE_DURATION_MS, 0, 1);
                 // Smooth ease-out cubic — fast start, soft stop (no bounce/loop)
-                const ease = 1 - Math.pow(1 - t, 3);
+                const ease = easeOutCubic(t);
                 const prevX = fighter.x;
                 let x = fighter.dodgeStartX + (fighter.dodgeEndX - fighter.dodgeStartX) * ease;
                 let y = fighter.y;
@@ -2886,18 +3094,40 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 };
             }
 
+            // dt for exp smoothing — tick is ~fixed; use 1/60 so feel is stable
+            const dt = 1 / 60;
             let vx = fighter.vx;
             if (!isLocked && fighter.hp > 0) {
                 const direction = leftPressed === rightPressed ? 0 : (leftPressed ? -1 : 1);
                 if (direction !== 0) {
-            const targetSpeed = (fighter.moveSet?.runSpeed ?? 5) * SPEED_SCALE * (currentlyGrounded ? GROUND_SPEED_MULT : AIR_SPEED_MULT);
-                    const accel = currentlyGrounded ? GROUND_ACCEL : AIR_ACCEL;
-                    vx = approach(vx, direction * targetSpeed, accel);
+                    const targetSpeed =
+                        (fighter.moveSet?.runSpeed ?? 5) *
+                        SPEED_SCALE *
+                        (currentlyGrounded ? GROUND_SPEED_MULT : AIR_SPEED_MULT);
+                    // Exponential approach: snappy start + quick reverse without skating
+                    const lambda = currentlyGrounded
+                        ? FIGHTER_MOVE_TUNING.groundLambda
+                        : FIGHTER_MOVE_TUNING.airLambda;
+                    vx = expApproach(vx, direction * targetSpeed, lambda, dt);
+                    // Instant direction commit when reverse-tapping (fighting-game feel)
+                    if (Math.sign(vx) !== 0 && Math.sign(vx) !== direction && currentlyGrounded) {
+                        vx = expApproach(vx, direction * targetSpeed, lambda * 1.6, dt);
+                    }
                 } else {
-                    vx *= currentlyGrounded ? GROUND_FRICTION : AIR_FRICTION;
+                    const stopL = currentlyGrounded
+                        ? FIGHTER_MOVE_TUNING.groundStopLambda
+                        : FIGHTER_MOVE_TUNING.airStopLambda;
+                    vx = expApproach(vx, 0, stopL, dt);
+                    // Legacy friction as a soft floor so micro-slides die
+                    vx *= currentlyGrounded ? 0.96 : AIR_FRICTION;
                 }
             } else {
-                vx *= currentlyGrounded ? 0.9 : AIR_FRICTION;
+                vx = expApproach(
+                    vx,
+                    0,
+                    currentlyGrounded ? 12 : FIGHTER_MOVE_TUNING.airStopLambda,
+                    dt,
+                );
             }
 
             let x = fighter.x + vx;
@@ -3177,11 +3407,23 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             const nextProjectiles: Projectile[] = [];
             for (const projectile of world.projectiles) {
                 if (now > projectile.expiresAt) continue;
-                let updated = {
+                const nextVy = projectile.hasGravity ? projectile.vy + PROJECTILE_GRAVITY : projectile.vy;
+                const nextX = projectile.x + projectile.vx;
+                const nextY = projectile.y + nextVy;
+                // Sample trail for motion blur (library projectiles + magic glow)
+                pushTrailSample(
+                    projectile.trail,
+                    nextX,
+                    nextY,
+                    velocityAngle(projectile.vx, nextVy),
+                    now,
+                );
+                let updated: Projectile = {
                     ...projectile,
-                    x: projectile.x + projectile.vx,
-                    y: projectile.y + projectile.vy,
-                    vy: projectile.hasGravity ? projectile.vy + PROJECTILE_GRAVITY : projectile.vy,
+                    x: nextX,
+                    y: nextY,
+                    vy: nextVy,
+                    trail: projectile.trail,
                 };
                 if (updated.x < -100 || updated.x > ARENA_WIDTH + 100 || updated.y > 1400) continue;
 
@@ -4130,6 +4372,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                         <div className="text-sm text-white/80 space-y-1">
                             <div>A/D: move · W: jump</div>
                             <div className="text-emerald-300">AA / DD: slide dodge 3× path (afterimages + full i-frames)</div>
+                            <div className="text-cyan-300/90">Blend + motion-blur projectiles · snappy exp movement · library skill FX</div>
                             <div className="text-cyan-300">SS: drop through floating platforms</div>
                             <div>Q: melee 1 · E: melee 2 (ground)</div>
                             <div className="text-sky-300">Air E: forward projectile · Air E+S: down-angle projectile</div>

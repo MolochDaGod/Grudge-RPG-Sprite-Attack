@@ -420,6 +420,13 @@ export function vfxDisplayScale(vfx: VfxDef, targetPx = 110): number {
   return Math.max(0.8, Math.min(5, targetPx / longest));
 }
 
+export type VfxComposite =
+  | "source-over"
+  | "lighter"
+  | "screen"
+  | "soft-light"
+  | "multiply";
+
 export function drawVfxFrame(
   ctx: CanvasRenderingContext2D,
   vfx: VfxDef,
@@ -428,6 +435,14 @@ export function drawVfxFrame(
   y: number,
   scale: number = 3,
   flip: boolean = false,
+  opts?: {
+    alpha?: number;
+    /** Additive/screen blend for skill pop + projectile glow */
+    composite?: VfxComposite;
+    /** Soft colored bloom under the sheet */
+    glowColor?: string;
+    glowRadius?: number;
+  },
 ) {
   const img = vfxImageCache.get(vfx.id);
   if (!img || !img.complete || !img.naturalWidth) return;
@@ -449,9 +464,25 @@ export function drawVfxFrame(
   if (sx >= maxW || sy >= maxH) return;
   const sw = Math.min(vfx.frameW, maxW - sx);
   const sh = Math.min(vfx.frameH, maxH - sy);
+  const alpha = opts?.alpha ?? 1;
+  if (alpha <= 0.01) return;
 
   ctx.save();
   ctx.imageSmoothingEnabled = false;
+  ctx.globalAlpha = alpha;
+  if (opts?.composite) ctx.globalCompositeOperation = opts.composite;
+
+  if (opts?.glowColor) {
+    const r = opts.glowRadius ?? Math.max(dw, dh) * 0.45;
+    const g = ctx.createRadialGradient(x, y, 2, x, y, r);
+    g.addColorStop(0, opts.glowColor);
+    g.addColorStop(1, "transparent");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   if (flip) {
     ctx.translate(x, 0);
     ctx.scale(-1, 1);
@@ -459,6 +490,17 @@ export function drawVfxFrame(
   }
   ctx.drawImage(img, sx, sy, sw, sh, x - dw / 2, y - dh / 2, dw, dh);
   ctx.restore();
+}
+
+/** Heuristic: magic / impact sheets look better additive; dust / blood stay normal. */
+export function vfxPreferredComposite(vfx: VfxDef): VfxComposite {
+  const cats = vfx.categories.join(" ").toLowerCase();
+  const id = vfx.id.toLowerCase();
+  if (/dust|smoke|blood|water|mist|physical/.test(cats + " " + id)) return "source-over";
+  if (/magic|fire|lightning|arcane|holy|ice|impact|slash|energy|projectile|cast/.test(cats + " " + id)) {
+    return "lighter";
+  }
+  return "source-over";
 }
 
 /**
