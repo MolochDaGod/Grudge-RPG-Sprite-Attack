@@ -5,10 +5,13 @@
   "license": "MIT",
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx server/index.ts",
+    "prebuild": "node scripts/verify-vfx-pipeline.mjs",
     "build": "vite build --config vite.config.ts",
     "build:server": "tsx script/build.ts",
     "start": "cross-env NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+    "vfx:verify": "node scripts/verify-vfx-pipeline.mjs",
+    "deploy:check": "node scripts/verify-vfx-pipeline.mjs && npm run build",
     "db:push": "drizzle-kit push",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",

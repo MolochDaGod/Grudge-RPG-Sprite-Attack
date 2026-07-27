@@ -5,14 +5,39 @@
 /** Production SSOT (info site + ObjectStore mirror + CDN). */
 const INFO_API = "https://info.grudge-studio.com/api/v1/effectSprites.json";
 const INFO_BASE = "https://info.grudge-studio.com";
+/** Same-origin catalog (vite proxy / vercel rewrite). Prefer first. */
+const LOCAL_API = "/cdn-api/effects.json";
 const GITHUB_API = "https://molochdagod.github.io/ObjectStore/api/v1/effectSprites.json";
 const LOCAL_BASE = "/fighter2d/effects";
 
-/** Prefer info host for remote sheet paths. */
+/**
+ * Prefer same-origin /cdn-effects proxy (vercel rewrite → info.grudge-studio.com)
+ * so production CSP + CORS stay clean. Absolute http(s) kept as-is.
+ * Paths under /sprites/effects/* map to /cdn-effects/*
+ */
 function remoteAssetUrl(src: string): string {
   if (!src) return src;
-  if (src.startsWith("http://") || src.startsWith("https://")) return src;
+  if (src.startsWith("http://") || src.startsWith("https://")) {
+    // Rewrite absolute info/objectstore effect URLs to same-origin proxy when possible
+    try {
+      const u = new URL(src);
+      if (
+        (u.hostname.includes("grudge-studio.com") || u.hostname.includes("github.io")) &&
+        u.pathname.includes("/sprites/effects/")
+      ) {
+        const rel = u.pathname.replace(/^\/sprites\/effects\//, "");
+        return `/cdn-effects/${rel}`;
+      }
+    } catch {
+      /* keep absolute */
+    }
+    return src;
+  }
   const path = src.startsWith("/") ? src : `/${src}`;
+  if (path.startsWith("/sprites/effects/")) {
+    return `/cdn-effects/${path.slice("/sprites/effects/".length)}`;
+  }
+  // Dev fallback: hit info host directly if proxy not available
   return `${INFO_BASE}${path}`;
 }
 
@@ -28,53 +53,53 @@ export interface VfxDef {
   categories: string[];
 }
 
-// ─── Pure VFX from info.grudge-studio.com (never character body sheets) ──
-// These are offline-safe CDN aliases until the full catalog merges in.
-const I = INFO_BASE;
-const SLASH_RED_MD = `${I}/sprites/effects/slash/slash_red_md.png`;
-const SLASH_RED_LG = `${I}/sprites/effects/slash/slash_red_lg.png`;
-const SLASH_RED_SM = `${I}/sprites/effects/slash/slash_red_sm.png`;
-const SLASH_BLUE_MD = `${I}/sprites/effects/slash/slash_blue_md.png`;
-const SLASH_BLUE_LG = `${I}/sprites/effects/slash/slash_blue_lg.png`;
-const SLASH_BLUE_SM = `${I}/sprites/effects/slash/slash_blue_sm.png`;
-const SLASH_GREEN_MD = `${I}/sprites/effects/slash/slash_green_md.png`;
-const SLASH_GREEN_LG = `${I}/sprites/effects/slash/slash_green_lg.png`;
-const SLASH_GREEN_SM = `${I}/sprites/effects/slash/slash_green_sm.png`;
-const SLASH_PURPLE_MD = `${I}/sprites/effects/slash/slash_purple_md.png`;
-const SLASH_PURPLE_LG = `${I}/sprites/effects/slash/slash_purple_lg.png`;
-const SLASH_PURPLE_SM = `${I}/sprites/effects/slash/slash_purple_sm.png`;
-const SLASH_ORANGE_MD = `${I}/sprites/effects/slash/slash_orange_md.png`;
-const SLASH_ORANGE_LG = `${I}/sprites/effects/slash/slash_orange_lg.png`;
-const SLASH_ORANGE_SM = `${I}/sprites/effects/slash/slash_orange_sm.png`;
-const SLASH_SHEET = `${I}/sprites/effects/slash_spritesheet.png`;
-const DEMON1 = `${I}/sprites/effects/demon_slash_1.png`;
-const DEMON2 = `${I}/sprites/effects/demon_slash_2.png`;
-const DEMON3 = `${I}/sprites/effects/demon_slash_3.png`;
-const HIT1 = `${I}/sprites/effects/hit_effect_1.png`;
-const HIT2 = `${I}/sprites/effects/hit_effect_2.png`;
-const HIT3 = `${I}/sprites/effects/hit_effect_3.png`;
-const HIT_BURST = `${I}/sprites/effects/custom/hit.png`;
-const CRIT = `${I}/sprites/effects/custom/crit.png`;
-const ARCANE_SLASH = `${I}/sprites/effects/custom/arcaneslash.png`;
-const WEAPON_HIT = `${I}/sprites/effects/pixel/10_weaponhit_spritesheet.png`;
-const SMEAR_H1 = `${I}/sprites/effects/pixel/smear_h1.png`;
-const SMEAR_H2 = `${I}/sprites/effects/pixel/smear_h2.png`;
-const SMEAR_H3 = `${I}/sprites/effects/pixel/smear_h3.png`;
-const SMEAR_V1 = `${I}/sprites/effects/pixel/smear_v1.png`;
-const SMEAR_V2 = `${I}/sprites/effects/pixel/smear_v2.png`;
-const SMEAR_V3 = `${I}/sprites/effects/pixel/smear_v3.png`;
-const IMPACT_FIRE_A = `${I}/sprites/effects/retro_impact/impactFireA.png`;
-const IMPACT_YELLOW_A = `${I}/sprites/effects/retro_impact/impactYellowA.png`;
-const IMPACT_RED_A = `${I}/sprites/effects/retro_impact/impactRedA.png`;
-const IMPACT_PURPLE_A = `${I}/sprites/effects/retro_impact/impactPurpleA.png`;
-const IMPACT_CYAN_A = `${I}/sprites/effects/retro_impact/impactCyanA.png`;
-const IMPACT_GREEN_A = `${I}/sprites/effects/retro_impact/impactGreenA.png`;
-const IMPACT_WHITE_A = `${I}/sprites/effects/retro_impact/impactWhiteA.png`;
-const IMPACT_MAGENTA_A = `${I}/sprites/effects/retro_impact/impactMagentaA.png`;
-const IMPACT_ORANGE_A = `${I}/sprites/effects/retro_impact/impactOrangeA.png`;
-const THUNDER_HIT = `${I}/sprites/effects/thunder_hit.png`;
-const HOLY_IMPACT = `${I}/sprites/effects/holy_impact.png`;
-const STAR_BURST = `${I}/sprites/effects/star_burst.png`;
+// ─── Pure VFX via same-origin /cdn-effects (vercel → info.grudge-studio.com)
+// Never character body sheets. Dev without proxy: vite proxies or absolute INFO_BASE.
+const CDN = "/cdn-effects";
+const SLASH_RED_MD = `${CDN}/slash/slash_red_md.png`;
+const SLASH_RED_LG = `${CDN}/slash/slash_red_lg.png`;
+const SLASH_RED_SM = `${CDN}/slash/slash_red_sm.png`;
+const SLASH_BLUE_MD = `${CDN}/slash/slash_blue_md.png`;
+const SLASH_BLUE_LG = `${CDN}/slash/slash_blue_lg.png`;
+const SLASH_BLUE_SM = `${CDN}/slash/slash_blue_sm.png`;
+const SLASH_GREEN_MD = `${CDN}/slash/slash_green_md.png`;
+const SLASH_GREEN_LG = `${CDN}/slash/slash_green_lg.png`;
+const SLASH_GREEN_SM = `${CDN}/slash/slash_green_sm.png`;
+const SLASH_PURPLE_MD = `${CDN}/slash/slash_purple_md.png`;
+const SLASH_PURPLE_LG = `${CDN}/slash/slash_purple_lg.png`;
+const SLASH_PURPLE_SM = `${CDN}/slash/slash_purple_sm.png`;
+const SLASH_ORANGE_MD = `${CDN}/slash/slash_orange_md.png`;
+const SLASH_ORANGE_LG = `${CDN}/slash/slash_orange_lg.png`;
+const SLASH_ORANGE_SM = `${CDN}/slash/slash_orange_sm.png`;
+const SLASH_SHEET = `${CDN}/slash_spritesheet.png`;
+const DEMON1 = `${CDN}/demon_slash_1.png`;
+const DEMON2 = `${CDN}/demon_slash_2.png`;
+const DEMON3 = `${CDN}/demon_slash_3.png`;
+const HIT1 = `${CDN}/hit_effect_1.png`;
+const HIT2 = `${CDN}/hit_effect_2.png`;
+const HIT3 = `${CDN}/hit_effect_3.png`;
+const HIT_BURST = `${CDN}/custom/hit.png`;
+const CRIT = `${CDN}/custom/crit.png`;
+const ARCANE_SLASH = `${CDN}/custom/arcaneslash.png`;
+const WEAPON_HIT = `${CDN}/pixel/10_weaponhit_spritesheet.png`;
+const SMEAR_H1 = `${CDN}/pixel/smear_h1.png`;
+const SMEAR_H2 = `${CDN}/pixel/smear_h2.png`;
+const SMEAR_H3 = `${CDN}/pixel/smear_h3.png`;
+const SMEAR_V1 = `${CDN}/pixel/smear_v1.png`;
+const SMEAR_V2 = `${CDN}/pixel/smear_v2.png`;
+const SMEAR_V3 = `${CDN}/pixel/smear_v3.png`;
+const IMPACT_FIRE_A = `${CDN}/retro_impact/impactFireA.png`;
+const IMPACT_YELLOW_A = `${CDN}/retro_impact/impactYellowA.png`;
+const IMPACT_RED_A = `${CDN}/retro_impact/impactRedA.png`;
+const IMPACT_PURPLE_A = `${CDN}/retro_impact/impactPurpleA.png`;
+const IMPACT_CYAN_A = `${CDN}/retro_impact/impactCyanA.png`;
+const IMPACT_GREEN_A = `${CDN}/retro_impact/impactGreenA.png`;
+const IMPACT_WHITE_A = `${CDN}/retro_impact/impactWhiteA.png`;
+const IMPACT_MAGENTA_A = `${CDN}/retro_impact/impactMagentaA.png`;
+const IMPACT_ORANGE_A = `${CDN}/retro_impact/impactOrangeA.png`;
+const THUNDER_HIT = `${CDN}/thunder_hit.png`;
+const HOLY_IMPACT = `${CDN}/holy_impact.png`;
+const STAR_BURST = `${CDN}/star_burst.png`;
 // Local-only strips still useful offline
 const SLASH_LOCAL = `${LOCAL_BASE}/slash_arc.png`;
 const BOLT = `${LOCAL_BASE}/lightning-bolt.png`;
@@ -316,7 +341,7 @@ function apiEffectToVfxDef(id: string, entry: any): VfxDef | null {
 }
 
 async function fetchObjectStoreVfx(): Promise<VfxDef[]> {
-  const endpoints = [INFO_API, GITHUB_API];
+  const endpoints = [LOCAL_API, INFO_API, GITHUB_API];
   for (const api of endpoints) {
     try {
       const res = await fetch(api);

@@ -1,6 +1,7 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type { Unit } from "@shared/schema";
 import type { AnimationState } from "@/components/game/AnimatedSprite";
+import { bootVfxPipeline, battleEffectToVfxId } from "@/lib/vfxPipeline";
 
 export interface UnitAnimationState {
   unitId: string;
@@ -43,6 +44,11 @@ export function useBattleAnimations(): UseBattleAnimationsReturn {
   const [isAnimating, setIsAnimating] = useState(false);
   const animationQueue = useRef<Promise<void>>(Promise.resolve());
 
+  // Warm production slash/impact catalog for turn-based battle visuals
+  useEffect(() => {
+    void bootVfxPipeline();
+  }, []);
+
   const setUnitAnimation = useCallback((unitId: string, animation: AnimationState) => {
     setUnitAnimations(prev => {
       const next = new Map(prev);
@@ -83,15 +89,26 @@ export function useBattleAnimations(): UseBattleAnimationsReturn {
     // Startup delay before active frames
     await waitForAnimation(150);
     
-    // Active frames - impact effect plays ON TARGET (point of contact)
+    // Multi-slash pipeline IDs (info.grudge-studio.com /cdn-effects)
+    const slashId = battleEffectToVfxId("slash");
+    const hitId = battleEffectToVfxId("hit");
     addEffect({
       type: "impact",
       targetUnitId: targetId,
       sourceUnitId: attackerId,
-      effectName: "slash",
+      effectName: slashId,
       color: "#ff4444",
       projectileType: "on_target",
-      duration: 120, // Very short impact flash (50-120ms as per guidelines)
+      duration: 180,
+    });
+    addEffect({
+      type: "impact",
+      targetUnitId: targetId,
+      sourceUnitId: attackerId,
+      effectName: hitId,
+      color: "#ffaa44",
+      projectileType: "on_target",
+      duration: 140,
     });
     
     // Hit reaction on target

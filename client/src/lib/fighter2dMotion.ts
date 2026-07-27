@@ -56,7 +56,7 @@ export function expApproach(current: number, target: number, lambda: number, dt:
   return current + (target - current) * k;
 }
 
-// ─── Animation crossfade ─────────────────────────────────────────
+// ─── Animation crossfade + generative intermediate frames ────────
 
 export interface AnimBlendState {
   /** Previous animation pose to fade out */
@@ -67,20 +67,39 @@ export interface AnimBlendState {
   /** When the blend started (ms) */
   startedAt: number;
   durationMs: number;
+  /** Previous pose sub-frame progress 0–1 (for generative dual-frame draw) */
+  prevFrameProgress?: number;
+}
+
+/**
+ * Generative frame blend: between discrete sprite strip cells we invent an
+ * intermediate pose by dual-drawing frame N and N+1 with inverse alphas.
+ * Feels like "AI" in-betweening without new art assets.
+ */
+export interface GenerativeFramePose {
+  frameA: number;
+  frameB: number;
+  /** 0 = pure A, 1 = pure B */
+  t: number;
 }
 
 export const ANIM_BLEND_MS = {
-  locomotion: 90, // idle ↔ run ↔ jump soft
-  attack: 45, // keep attacks readable / punchy
-  hit: 30,
+  locomotion: 140, // idle ↔ run soft (longer = smoother walk blend)
+  attack: 70,
+  hit: 55,
+  special: 90,
   none: 0,
 } as const;
+
+/** How strongly consecutive strip frames are dual-drawn (0 = hard cut, 1 = full in-between). */
+export const GENERATIVE_FRAME_STRENGTH = 0.72;
 
 export function beginAnimBlend(
   prevState: string,
   prevFrame: number,
   durationMs: number,
   now: number,
+  prevFrameProgress = 0,
 ): AnimBlendState {
   return {
     prevState,
@@ -88,6 +107,7 @@ export function beginAnimBlend(
     weight: 0,
     startedAt: now,
     durationMs: Math.max(0, durationMs),
+    prevFrameProgress,
   };
 }
 
@@ -95,7 +115,85 @@ export function tickAnimBlend(blend: AnimBlendState | null, now: number): AnimBl
   if (!blend || blend.durationMs <= 0) return null;
   const t = (now - blend.startedAt) / blend.durationMs;
   if (t >= 1) return null;
-  return { ...blend, weight: smoothstep(t) };
+  // Slightly softer than pure smoothstep for organic AI-like ease
+  const s = smoothstep(t);
+  const organic = s * 0.85 + easeOutCubic(t) * 0.15;
+  return { ...blend, weight: organic };
+}
+
+/**
+ * Build a generative pose from integer frame index + 0–1 progress toward next.
+ * Looping strips wrap; non-loop hold last frame (no ghost past end).
+ */
+export function generativePose(
+  frameIndex: number,
+  frameProgress: number,
+  frameCount: number,
+  loop: boolean,
+  strength = GENERATIVE_FRAME_STRENGTH,
+): GenerativeFramePose {
+  const n = Math.max(1, frameCount);
+  const fi = ((frameIndex % n) + n) % n;
+  const p = clamp(frameProgress, 0, 1) * strength;
+  if (p < 0.02) return { frameA: fi, frameB: fi, t: 0 };
+  let next = fi + 1;
+  if (next >= n) next = loop ? 0 : n - 1;
+  if (next === fi) return { frameA: fi, frameB: fi, t: 0 };
+  return { frameA: fi, frameB: next, t: p };
+}
+
+/**
+ * Draw one strip frame (or generative dual-frame in-between) with optional
+ * flip/rotation already applied by caller transform.
+ */
+export function drawGenerativeStripFrame(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  frameWidth: number,
+  frameHeight: number,
+  pose: GenerativeFramePose,
+  destX: number,
+  destY: number,
+  destW: number,
+  destH: number,
+  alpha = 1,
+): void {
+  if (!img.complete || !img.naturalWidth || alpha <= 0.01) return;
+  const maxFrames = Math.max(1, Math.floor(img.naturalWidth / Math.max(1, frameWidth)));
+  const drawCell = (frame: number, a: number) => {
+    if (a <= 0.01) return;
+    const fi = Math.max(0, Math.min(frame, maxFrames - 1));
+    const sx = fi * frameWidth;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, sx, 0, frameWidth, frameHeight, destX, destY, destW, destH);
+    ctx.restore();
+  };
+  if (pose.t < 0.02 || pose.frameA === pose.frameB) {
+    drawCell(pose.frameA, alpha);
+    return;
+  }
+  // Generative in-between: both cells, inverse weights (crossfade)
+  drawCell(pose.frameA, alpha * (1 - pose.t));
+  drawCell(pose.frameB, alpha * pose.t);
+}
+
+/** Preferred blend duration by state transition (AI-tuned readability). */
+export function blendMsForTransition(from: string, to: string): number {
+  if (from === to) return 0;
+  if (to === "dodge") return ANIM_BLEND_MS.none;
+  if (to === "takeHit" || to === "death") return ANIM_BLEND_MS.hit;
+  if (to === "attack" || to === "attack2") return ANIM_BLEND_MS.attack;
+  if (to === "special") return ANIM_BLEND_MS.special;
+  if (
+    (from === "idle" || from === "run") &&
+    (to === "idle" || to === "run" || to === "jump" || to === "fall")
+  ) {
+    return ANIM_BLEND_MS.locomotion;
+  }
+  if (from === "jump" || from === "fall") return 100;
+  return ANIM_BLEND_MS.locomotion;
 }
 
 // ─── Motion trail (projectiles / dash ghosts) ────────────────────

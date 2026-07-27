@@ -11,6 +11,8 @@
     "VITE_APP_ORIGIN": "https://grudge-rpg-sprite-attack.vercel.app",
     "VITE_ASSETS_URL": "https://assets.grudge-studio.com",
     "VITE_OBJECTSTORE_URL": "https://objectstore.grudge-studio.com",
+    "VITE_INFO_BASE_URL": "https://info.grudge-studio.com",
+    "VITE_EFFECTS_CATALOG_URL": "https://info.grudge-studio.com/api/v1/effectSprites.json",
     "VITE_ENGINE_URL": "https://dcq.grudge-studio.com/editor",
     "VITE_GDEVELOP_URL": "https://wcs.grudge-studio.com",
     "VITE_WARLORDS_URL": "https://grudgewarlords.com"
@@ -26,12 +28,20 @@
         { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.puter.com https://fonts.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; media-src 'self' blob: data:; connect-src 'self' https://*.grudge-studio.com https://*.up.railway.app https://grudge-api-production-0d46.up.railway.app https://objectstore.grudge-studio.com https://assets.grudge-studio.com https://id.grudge-studio.com https://js.puter.com https://puter.com wss://*.grudge-studio.com wss://*.up.railway.app; frame-src 'self' https://*.grudge-studio.com https://js.puter.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self' https://id.grudge-studio.com; frame-ancestors 'self' https://grudge-studio.com https://*.grudge-studio.com https://*.vercel.app; upgrade-insecure-requests"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.puter.com https://fonts.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https: https://info.grudge-studio.com https://molochdagod.github.io https://assets.grudge-studio.com; media-src 'self' blob: data:; connect-src 'self' https://*.grudge-studio.com https://info.grudge-studio.com https://molochdagod.github.io https://*.up.railway.app https://grudge-api-production-0d46.up.railway.app https://objectstore.grudge-studio.com https://assets.grudge-studio.com https://id.grudge-studio.com https://js.puter.com https://puter.com wss://*.grudge-studio.com wss://*.up.railway.app; frame-src 'self' https://*.grudge-studio.com https://js.puter.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self' https://id.grudge-studio.com; frame-ancestors 'self' https://grudge-studio.com https://*.grudge-studio.com https://*.vercel.app; upgrade-insecure-requests"
         }
       ]
     }
   ],
   "rewrites": [
+    {
+      "source": "/cdn-effects/:path*",
+      "destination": "https://info.grudge-studio.com/sprites/effects/:path*"
+    },
+    {
+      "source": "/cdn-api/effects.json",
+      "destination": "https://info.grudge-studio.com/api/v1/effectSprites.json"
+    },
     {
       "source": "/auth/callback",
       "destination": "/index.html"
@@ -95,6 +105,10 @@
     {
       "source": "/api/assets/:path*",
       "destination": "https://assets.grudge-studio.com/:path*"
+    },
+    {
+      "source": "/api/v1/effectSprites.json",
+      "destination": "https://info.grudge-studio.com/api/v1/effectSprites.json"
     },
     {
       "source": "/(.*)",

@@ -33,6 +33,19 @@ export default defineConfig(({ mode }) => {
         "/api/characters": { target: gameDataApi, changeOrigin: true, secure: true },
         "/api/wallet": { target: gameDataApi, changeOrigin: true, secure: true },
         "/api/treaty": { target: gameDataApi, changeOrigin: true, secure: true },
+        // Production VFX pipeline (mirrors vercel.json rewrites)
+        "/cdn-effects": {
+          target: "https://info.grudge-studio.com",
+          changeOrigin: true,
+          secure: true,
+          rewrite: (p) => p.replace(/^\/cdn-effects/, "/sprites/effects"),
+        },
+        "/cdn-api/effects.json": {
+          target: "https://info.grudge-studio.com",
+          changeOrigin: true,
+          secure: true,
+          rewrite: () => "/api/v1/effectSprites.json",
+        },
       },
     },
   };
