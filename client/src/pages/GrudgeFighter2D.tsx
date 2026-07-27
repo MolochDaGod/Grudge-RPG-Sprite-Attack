@@ -37,6 +37,24 @@ import {
     type AnimBlendState,
     type MotionTrail,
 } from "@/lib/fighter2dMotion";
+import {
+    beginRagdollFromHit,
+    calcKnockbackRagdoll,
+    createIdleRagdoll,
+    ragdollDrawTransform,
+    tickRagdoll,
+    type HitZone,
+    type KnockbackAngle,
+    type RagdollState,
+} from "@/lib/fighterRagdoll";
+import {
+    beginSuperSequence,
+    getUltimateForCharacter,
+    markSuperHitDealt,
+    pendingSuperHits,
+    type SuperSequenceState,
+    type UltimateDef,
+} from "@/lib/fighterUltimates";
 import { getFaction, type FactionId } from "@/lib/factions";
 import { playSound, preloadSounds as preloadGameSounds } from "@/lib/gameSounds";
 import { getDefaultVfx } from "@/lib/defaultVfx";
@@ -129,6 +147,8 @@ interface FighterRuntime {
     dodgeEndX: number;
     /** Short crossfade from previous pose (idle↔run, attack startup) */
     animBlend: AnimBlendState | null;
+    /** Hit-reaction ragdoll (tumble / bounce / limp) */
+    ragdoll: RagdollState;
 }
 
 /** Fading silhouette ghosts left during AA/DD slide */
@@ -170,7 +190,12 @@ interface WorldState {
     projectiles: Projectile[];
     winner: FighterId | null;
     startedAt: number;
+    /** Legacy single-hit freeze (kept null when using superSequence) */
     superFreeze: { attacker: FighterId; until: number; damageAt: number; dealt: boolean } | null;
+    /** Multi-phase ultimate cinematic */
+    superSequence: SuperSequenceState | null;
+    /** Fullscreen flash during ultimate hits */
+    superFlash: { color: string; until: number } | null;
 }
 
 interface GrudgeFighter2DProps {
@@ -652,6 +677,7 @@ function createInitialFighter(id: FighterId, charDef: CharacterDef, stage: Stage
         dodgeStartX: 0,
         dodgeEndX: 0,
         animBlend: null,
+        ragdoll: createIdleRagdoll(),
     };
 }
 
@@ -682,6 +708,7 @@ function respawnFighter(fighter: FighterRuntime, stage: StageDefinition): Fighte
         dodgeStartX: 0,
         dodgeEndX: 0,
         animBlend: null,
+        ragdoll: createIdleRagdoll(),
     };
 }
 
@@ -839,47 +866,30 @@ function setState(fighter: FighterRuntime, state: AnimationState, now: number): 
     };
 }
 
-// Smash-style knockback: the lower your HP, the further you fly
-// moveVariant controls launch angle: up-special launches upward, down attacks spike down
-type KnockbackAngle = "neutral" | "up" | "down" | "spike" | "forward";
-function calcKnockback(damage: number, targetHp: number, targetMaxHp: number, angle: KnockbackAngle = "neutral"): { kbX: number; kbY: number; hitstun: number } {
-    const hpPercent = 1 - (targetHp / targetMaxHp); // 0 at full HP, ~1 at near-death
-    const baseKb = 3 + damage * 0.25;
-    const scaledKb = baseKb * (1 + hpPercent * 2.5); // up to 3.5x knockback at low HP
-    let kbX = scaledKb;
-    let kbY = -(2 + hpPercent * 8 + damage * 0.15); // default upward
-    const hitstun = 200 + hpPercent * 300; // longer hitstun at low HP
-
-    // Directional knockback per attack type
-    if (angle === "up") {
-        kbY *= 1.6;           // strong upward launch
-        kbX *= 0.4;           // minimal horizontal
-    } else if (angle === "down" || angle === "spike") {
-        kbY = Math.abs(kbY) * 0.8;  // downward spike (positive Y = down)
-        kbX *= 0.5;
-    } else if (angle === "forward") {
-        kbY *= 0.5;           // low-angle forward launch
-        kbX *= 1.3;
-    }
-
-    return { kbX, kbY, hitstun };
-}
-
 function applyDamage(
     target: FighterRuntime,
     attacker: FighterRuntime,
     damage: number,
     now: number,
-    kbAngle: KnockbackAngle = "neutral"
+    kbAngle: KnockbackAngle = "neutral",
+    zone: HitZone = "body",
 ): { target: FighterRuntime; attacker: FighterRuntime; wasCounter: boolean } {
     // Invulnerability check (respawn protection)
     if (target.invulnUntil > now) {
         return { target, attacker, wasCounter: false };
     }
     if (target.counterUntil > now && target.state !== "death") {
-        const counterKb = calcKnockback(target.moveSet.counterDamage, attacker.hp, attacker.maxHp, "forward");
+        const counterKb = calcKnockbackRagdoll(
+            target.moveSet.counterDamage,
+            attacker.hp,
+            attacker.maxHp,
+            "forward",
+            "body",
+            DISTANCE_SCALE,
+        );
         playSound("parry");
         const newAttackerHp = Math.max(0, attacker.hp - target.moveSet.counterDamage);
+        const ragdoll = beginRagdollFromHit(now, counterKb, target.facing, "body");
         const nextAttacker = setState(
             {
                 ...attacker,
@@ -887,6 +897,7 @@ function applyDamage(
                 vx: -target.facing * counterKb.kbX,
                 vy: counterKb.kbY,
                 stateLockUntil: now + counterKb.hitstun,
+                ragdoll,
             },
             newAttackerHp <= 0 ? "death" : "takeHit",
             now
@@ -899,15 +910,20 @@ function applyDamage(
     }
 
     const nextHp = Math.max(0, target.hp - damage);
-    const kb = calcKnockback(damage, target.hp, target.maxHp, kbAngle);
+    const kb = calcKnockbackRagdoll(damage, target.hp, target.maxHp, kbAngle, zone, DISTANCE_SCALE);
+    const ragdoll = beginRagdollFromHit(now, kb, attacker.facing, zone);
     const damagedTarget = setState(
         {
             ...target,
             hp: nextHp,
             vx: attacker.facing * kb.kbX,
             vy: kb.kbY,
-            stateLockUntil: now + kb.hitstun,
+            stateLockUntil: now + Math.max(kb.hitstun, kb.tumbleMs * 0.55),
             counterUntil: 0,
+            ragdoll,
+            // Cancel their own offense mid-string
+            attackHasConnected: true,
+            moveVariant: "none",
         },
         nextHp <= 0 ? "death" : "takeHit",
         now
@@ -1325,6 +1341,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             winner: null,
             startedAt: performance.now(),
             superFreeze: null,
+            superSequence: null,
+            superFlash: null,
         };
         cameraRef.current = { x: stage.mainFloorX, y: stage.mainFloorY - 400, zoom: 1 };
         setHud({ p1Hp: 200, p2Hp: 200, p1Super: 0, p2Super: 0, p1Stocks: STARTING_STOCKS, p2Stocks: STARTING_STOCKS, p1AirJumps: MAX_AIR_JUMPS, p2AirJumps: MAX_AIR_JUMPS, winner: null, elapsed: 0 });
@@ -1570,23 +1588,63 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
 
     const queueSuper = useCallback((fighterId: FighterId) => {
         const world = worldRef.current;
-        if (!world || world.superFreeze || world.winner) return;
+        if (!world || world.superFreeze || world.superSequence || world.winner) return;
         const now = performance.now();
         const actor = fighterId === "p1" ? world.p1 : world.p2;
         if (actor.hp <= 0 || actor.superMeter < SUPER_METER_MAX) return;
         if (now < actor.stateLockUntil) return;
-        world.superFreeze = { attacker: fighterId, until: now + SUPER_FREEZE_DURATION, damageAt: now + SUPER_FREEZE_DURATION * 0.7, dealt: false };
-        const next = setState({ ...actor, superMeter: 0, stateLockUntil: now + SUPER_FREEZE_DURATION + 200, attackHasConnected: false, moveVariant: "none" }, "special", now);
+        if (actor.ragdoll?.active) return;
+
+        const charDef = fighterId === "p1" ? p1Pick : p2Pick;
+        const ultimate = getUltimateForCharacter(
+            charDef?.id ?? fighterId,
+            charDef?.name ?? actor.moveSet.name,
+            actor.moveSet.superName,
+        );
+        world.superSequence = beginSuperSequence(fighterId, ultimate, now);
+        world.superFreeze = null;
+        const next = setState(
+            {
+                ...actor,
+                superMeter: 0,
+                stateLockUntil: now + ultimate.durationMs + 250,
+                attackHasConnected: false,
+                moveVariant: "none",
+                vx: 0,
+                ragdoll: createIdleRagdoll(),
+            },
+            "special",
+            now,
+        );
         if (fighterId === "p1") world.p1 = next; else world.p2 = next;
         playSound("super_charge");
-    }, []);
+        // Charge burst at feet
+        const charge = getVfxById(ultimate.chargeVfx);
+        if (charge) {
+            getVfxImage(charge.id);
+            activeEffectsRef.current.push({
+                id: `fx-ult-charge-${now}`,
+                x: actor.x,
+                y: actor.y - actor.height * 0.4,
+                vfx: charge,
+                hold: 2,
+                frameIndex: 0,
+                frameTick: 0,
+                scale: vfxDisplayScale(charge, 160) * MOTION_INTENSITY,
+                flip: actor.facing < 0,
+                additive: true,
+                glowColor: "rgba(255,220,120,0.55)",
+            });
+        }
+    }, [p1Pick, p2Pick]);
 
     const queueDodge = useCallback((fighterId: FighterId, direction: -1 | 1) => {
         const world = worldRef.current;
-        if (!world || world.superFreeze) return;
+        if (!world || world.superFreeze || world.superSequence) return;
         const now = performance.now();
         const actor = fighterId === "p1" ? world.p1 : world.p2;
         if (world.winner || actor.hp <= 0) return;
+        if (actor.ragdoll?.active) return;
         if (now < actor.stateLockUntil || now < actor.specialCooldownUntil) return;
 
         // Path directly left/right of the fighter (front or behind depending on facing)
@@ -2072,6 +2130,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             winner: null,
             startedAt: performance.now(),
             superFreeze: null,
+            superSequence: null,
+            superFlash: null,
         };
         cameraRef.current = { x: stage.mainFloorX, y: stage.mainFloorY - 400, zoom: 1 };
 
@@ -2287,6 +2347,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             facing: 1 | -1,
             alpha: number,
             charDef: CharacterDef | null,
+            ragdoll?: RagdollState | null,
         ) => {
             const safeFrame = Math.max(0, Math.min(frameIndex, Math.max(0, sprite.def.frames - 1)));
             const sourceX = safeFrame * sprite.frameWidth;
@@ -2298,22 +2359,35 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             const drawHeight = sprite.frameHeight * scaleY;
             const drawX = x - drawWidth / 2;
             const drawY = y - drawHeight + sprite.bottomPadding * scaleY;
+            const xform = ragdoll ? ragdollDrawTransform(ragdoll) : null;
 
             ctx.save();
-            ctx.globalAlpha = alpha;
+            ctx.globalAlpha = Math.min(1, alpha + (xform?.alphaBoost ?? 0) * 0.25);
             ctx.imageSmoothingEnabled = false;
-            if (facing < 0) {
-                ctx.translate(x, 0);
-                ctx.scale(-1, 1);
-                ctx.translate(-x, 0);
+            // Pivot at feet for tumble physics
+            ctx.translate(x, y);
+            if (xform && (Math.abs(xform.angle) > 0.01 || xform.scaleX !== 1 || xform.scaleY !== 1)) {
+                ctx.rotate(xform.angle);
+                ctx.scale(xform.scaleX * (facing < 0 ? -1 : 1), xform.scaleY);
+                ctx.drawImage(
+                    sprite.image,
+                    sourceX, 0,
+                    sprite.frameWidth, sprite.frameHeight,
+                    -drawWidth / 2, -drawHeight + sprite.bottomPadding * scaleY,
+                    drawWidth, drawHeight,
+                );
+            } else {
+                if (facing < 0) {
+                    ctx.scale(-1, 1);
+                }
+                ctx.drawImage(
+                    sprite.image,
+                    sourceX, 0,
+                    sprite.frameWidth, sprite.frameHeight,
+                    -drawWidth / 2, -drawHeight + sprite.bottomPadding * scaleY,
+                    drawWidth, drawHeight,
+                );
             }
-            ctx.drawImage(
-                sprite.image,
-                sourceX, 0,
-                sprite.frameWidth, sprite.frameHeight,
-                drawX, drawY,
-                drawWidth, drawHeight
-            );
             ctx.restore();
         };
 
@@ -2343,19 +2417,26 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             const charDef = fighter.id === "p1" ? p1Pick : p2Pick;
             const blend = nowMs != null ? tickAnimBlend(fighter.animBlend, nowMs) : fighter.animBlend;
 
+            // Prefer hurt frame freeze while ragdoll tumbling (readable body)
+            const rag = fighter.ragdoll;
+            const poseFrame =
+                rag?.active && poseState === "takeHit"
+                    ? Math.min(safeFrame, Math.max(0, currentSprite.def.frames - 1))
+                    : safeFrame;
+
             // Crossfade previous pose under current for smoother state changes
-            if (blend && blend.weight < 1 && !useIdlePose) {
+            if (blend && blend.weight < 1 && !useIdlePose && !rag?.active) {
                 const prevKey = blend.prevState as AnimationState;
                 const prevSprite = sprites[prevKey] ?? sprites.idle;
                 const prevAlpha = alpha * (1 - blend.weight) * 0.85;
                 if (prevAlpha > 0.04) {
-                    drawOnePose(prevSprite, blend.prevFrame, x, y, facing, prevAlpha, charDef);
+                    drawOnePose(prevSprite, blend.prevFrame, x, y, facing, prevAlpha, charDef, rag);
                 }
-                drawOnePose(currentSprite, safeFrame, x, y, facing, alpha * Math.max(0.35, blend.weight), charDef);
+                drawOnePose(currentSprite, poseFrame, x, y, facing, alpha * Math.max(0.35, blend.weight), charDef, rag);
                 return;
             }
 
-            drawOnePose(currentSprite, safeFrame, x, y, facing, alpha, charDef);
+            drawOnePose(currentSprite, poseFrame, x, y, facing, alpha, charDef, rag);
         };
 
         const drawAfterImages = (
@@ -2956,36 +3037,57 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             drawStamina(40, world.p1.stamina);
             drawStamina(VIEWPORT_W - 240, world.p2.stamina);
 
-            // Super freeze cutscene overlay
-            if (world.superFreeze && now < world.superFreeze.until) {
-                const progress = (now - (world.superFreeze.until - SUPER_FREEZE_DURATION)) / SUPER_FREEZE_DURATION;
+            // Ultimate cinematic overlay (multi-phase or legacy freeze)
+            const ultSeq = world.superSequence;
+            const legacySuper = world.superFreeze;
+            if (ultSeq || (legacySuper && now < legacySuper.until)) {
+                const until = ultSeq ? ultSeq.until : legacySuper!.until;
+                const started = ultSeq ? ultSeq.startedAt : until - SUPER_FREEZE_DURATION;
+                const duration = Math.max(1, until - started);
+                const progress = clamp((now - started) / duration, 0, 1);
+                const attackerId = ultSeq ? ultSeq.attacker : legacySuper!.attacker;
+                const ultName = ultSeq?.ultimate.name
+                    ?? (attackerId === "p1" ? p1Pick : p2Pick)?.moveSet.superName
+                    ?? "SUPER";
+                const fighterName = (attackerId === "p1" ? p1Pick : p2Pick)?.name ?? "";
                 ctx.save();
-                // Darken + zoom lines
-                ctx.globalAlpha = 0.5;
+                ctx.globalAlpha = 0.45 + progress * 0.15;
                 ctx.fillStyle = "#000";
                 ctx.fillRect(0, 0, VIEWPORT_W, VIEWPORT_H);
-                // Radial burst lines
-                ctx.globalAlpha = 0.3 + 0.3 * Math.sin(now / 30);
+                ctx.globalAlpha = 0.25 + 0.35 * Math.sin(now / 28);
                 ctx.strokeStyle = "#ffd700";
                 ctx.lineWidth = 2;
-                for (let i = 0; i < 24; i++) {
-                    const angle = (i / 24) * Math.PI * 2 + now / 200;
+                for (let i = 0; i < 28; i++) {
+                    const angle = (i / 28) * Math.PI * 2 + now / 180;
                     ctx.beginPath();
-                    ctx.moveTo(VIEWPORT_W / 2 + Math.cos(angle) * 40, VIEWPORT_H / 2 + Math.sin(angle) * 40);
-                    ctx.lineTo(VIEWPORT_W / 2 + Math.cos(angle) * (200 + progress * 400), VIEWPORT_H / 2 + Math.sin(angle) * (200 + progress * 400));
+                    ctx.moveTo(VIEWPORT_W / 2 + Math.cos(angle) * 36, VIEWPORT_H / 2 + Math.sin(angle) * 36);
+                    ctx.lineTo(VIEWPORT_W / 2 + Math.cos(angle) * (180 + progress * 480), VIEWPORT_H / 2 + Math.sin(angle) * (180 + progress * 480));
                     ctx.stroke();
                 }
-                // Super name text
-                ctx.globalAlpha = Math.min(1, progress * 3);
+                ctx.globalAlpha = Math.min(1, progress * 4);
                 ctx.fillStyle = "#ffd700";
-                ctx.font = "bold 48px serif";
+                ctx.font = "bold 46px serif";
                 ctx.textAlign = "center";
-                const name = (world.superFreeze.attacker === "p1" ? p1Pick : p2Pick)?.moveSet.superName ?? "SUPER";
-                ctx.fillText(name, VIEWPORT_W / 2, VIEWPORT_H / 2 - 30);
-                ctx.font = "24px serif";
+                ctx.fillText(ultName, VIEWPORT_W / 2, VIEWPORT_H / 2 - 36);
+                ctx.font = "22px serif";
                 ctx.fillStyle = "#fff";
-                ctx.fillText((world.superFreeze.attacker === "p1" ? p1Pick : p2Pick)?.name ?? "", VIEWPORT_W / 2, VIEWPORT_H / 2 + 20);
+                ctx.fillText(fighterName, VIEWPORT_W / 2, VIEWPORT_H / 2 + 16);
+                if (ultSeq) {
+                    ctx.font = "14px sans-serif";
+                    ctx.fillStyle = "rgba(255,255,255,0.7)";
+                    ctx.fillText(`${ultSeq.hitsDealt.length}/${ultSeq.ultimate.hits.length} IMPACTS`, VIEWPORT_W / 2, VIEWPORT_H / 2 + 48);
+                }
                 ctx.textAlign = "left";
+                ctx.restore();
+            }
+
+            // Super hit color flash
+            if (world.superFlash && now < world.superFlash.until) {
+                const life = (world.superFlash.until - now) / 180;
+                ctx.save();
+                ctx.globalAlpha = clamp(life, 0, 1) * 0.55;
+                ctx.fillStyle = world.superFlash.color;
+                ctx.fillRect(0, 0, VIEWPORT_W, VIEWPORT_H);
                 ctx.restore();
             }
 
@@ -3052,6 +3154,71 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             const leftPressed = keys.has(controls.left);
             const rightPressed = keys.has(controls.right);
             const currentlyGrounded = isOnPlatform(fighter, stage, ignoreOneWayPlatforms) !== null;
+            // Fixed timestep for exp smoothing + ragdoll (stable feel)
+            const dt = 1 / 60;
+
+            // ── Ragdoll hit reaction: tumble, bounce, limp AI recovery ──
+            if (fighter.ragdoll?.active) {
+                const floorProbe = isOnPlatform(fighter, stage, ignoreOneWayPlatforms);
+                const groundedR = floorProbe !== null;
+                const tick = tickRagdoll(
+                    {
+                        x: fighter.x,
+                        y: fighter.y,
+                        vx: fighter.vx,
+                        vy: fighter.vy,
+                        grounded: groundedR,
+                        floorY: floorProbe,
+                        gravity: GRAVITY * FALL_GRAVITY_SCALE,
+                        now,
+                        ragdoll: fighter.ragdoll,
+                    },
+                    dt,
+                );
+                if (tick.bounced) {
+                    // Dust / impact on body bounce
+                    const dust = getVfxById("dustCloud") ?? getVfxById("hitEffect1") ?? getVfxById("smokeVfx1");
+                    if (dust) {
+                        getVfxImage(dust.id);
+                        activeEffectsRef.current.push({
+                            id: `fx-bounce-${now}-${fighter.id}`,
+                            x: tick.x,
+                            y: tick.y - 8,
+                            vfx: dust,
+                            hold: 2,
+                            frameIndex: 0,
+                            frameTick: 0,
+                            scale: vfxDisplayScale(dust, 90) * (0.8 + fighter.ragdoll.impactForce * 0.25),
+                            flip: false,
+                            additive: false,
+                            glowColor: "rgba(200,180,140,0.35)",
+                        });
+                    }
+                    playSound("hit_light");
+                    triggerScreenShake(4 + fighter.ragdoll.impactForce * 3, 80);
+                }
+                let nextR: FighterRuntime = {
+                    ...fighter,
+                    x: tick.x,
+                    y: tick.y,
+                    vx: tick.vx,
+                    vy: tick.vy,
+                    ragdoll: tick.ragdoll,
+                    // Hold takeHit / death pose while tumbling
+                    state: fighter.hp <= 0 ? "death" : "takeHit",
+                    stateLockUntil: Math.max(fighter.stateLockUntil, tick.ragdoll.active ? tick.ragdoll.until : now),
+                };
+                if (tick.recovered && fighter.hp > 0) {
+                    nextR = {
+                        ...setState(nextR, groundedR ? "idle" : "fall", now),
+                        ragdoll: createIdleRagdoll(),
+                        stateLockUntil: now + 80,
+                        moveVariant: "none",
+                    };
+                }
+                // Blast zone still applies while ragdolled
+                return nextR;
+            }
 
             // ── AA/DD slide dodge: ease-out along horizontal path, full i-frames ──
             if (fighter.state === "dodge" && fighter.moveVariant === "slide" && isLocked) {
@@ -3105,10 +3272,8 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 };
             }
 
-            // dt for exp smoothing — tick is ~fixed; use 1/60 so feel is stable
-            const dt = 1 / 60;
             let vx = fighter.vx;
-            if (!isLocked && fighter.hp > 0) {
+            if (!isLocked && fighter.hp > 0 && !fighter.ragdoll?.active) {
                 const direction = leftPressed === rightPressed ? 0 : (leftPressed ? -1 : 1);
                 if (direction !== 0) {
                     const targetSpeed =
@@ -3263,13 +3428,14 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                         attacker.moveVariant === "downSpecial" ? Math.round(attacker.moveSet.counterDamage * 0.9) :
                             attacker.moveSet.baseDamage;
 
-            // Directional knockback based on move type
+            // Directional knockback based on move type + hit zone
+            const zone: HitZone = headHit ? "head" : legsHit ? "legs" : "body";
             const kbAngle: KnockbackAngle =
                 attacker.moveVariant === "upSpecial" ? "up" :
-                attacker.moveVariant === "downSpecial" ? "down" :
+                attacker.moveVariant === "downSpecial" ? "spike" :
                 attacker.moveVariant === "dash" ? "forward" :
                 headHit ? "up" : "neutral";
-            const result = applyDamage(defender, attacker, Math.round(baseDamage * damageMultiplier), now, kbAngle);
+            const result = applyDamage(defender, attacker, Math.round(baseDamage * damageMultiplier), now, kbAngle, zone);
 
             // Sound
             playSound(headHit ? "hit_head" : attacker.moveVariant === "dash" ? "hit_heavy" : "hit_light");
@@ -3360,7 +3526,81 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             let world = worldRef.current;
             const stage = stageRef.current;
 
-            // Process super freeze
+            // Process multi-phase ultimate sequence (ragdoll-heavy finisher)
+            if (world.superSequence) {
+                const seq = world.superSequence;
+                const atkId = seq.attacker;
+                let atk = atkId === "p1" ? world.p1 : world.p2;
+                let def = atkId === "p1" ? world.p2 : world.p1;
+                const superChar = atkId === "p1" ? p1Pick : p2Pick;
+
+                // Aura pulse while charging
+                if (!seq.chargeSpawned) {
+                    const aura = getVfxById(seq.ultimate.auraVfx) ?? getVfxById(seq.ultimate.chargeVfx);
+                    spawnVfx(aura, atk.x, atk.y - atk.height * 0.45, atk.facing < 0, 2, aura ? vfxDisplayScale(aura, 180) * MOTION_INTENSITY : undefined);
+                    world.superSequence = { ...seq, chargeSpawned: true };
+                }
+
+                const pending = pendingSuperHits(world.superSequence, now);
+                for (const hit of pending) {
+                    const dmg = Math.round(atk.moveSet.superDamage * hit.damageMul);
+                    const isFinisher = hit.knockback === "launch" || hit === seq.ultimate.hits[seq.ultimate.hits.length - 1];
+                    playSound(isFinisher ? "super_impact" : "hit_heavy");
+                    const result = applyDamage(def, atk, dmg, now, hit.knockback, isFinisher ? "head" : "body");
+                    atk = result.attacker;
+                    def = result.target;
+                    // Force heavy launch ragdoll on finisher
+                    if (isFinisher && def.ragdoll) {
+                        def = {
+                            ...def,
+                            ragdoll: {
+                                ...def.ragdoll,
+                                active: true,
+                                until: now + 1100,
+                                bouncesLeft: Math.max(def.ragdoll.bouncesLeft, 2),
+                                spin: def.ragdoll.spin * 1.35,
+                                impactForce: Math.max(def.ragdoll.impactForce, 2.4),
+                            },
+                        };
+                    }
+                    const hitVfx = getVfxById(hit.hitVfx);
+                    const swingVfx = hit.swingVfx ? getVfxById(hit.swingVfx) : null;
+                    spawnVfx(hitVfx, def.x, def.y - def.height * 0.5, false, 2, hitVfx ? vfxDisplayScale(hitVfx, 140) * MOTION_INTENSITY : undefined);
+                    if (swingVfx) {
+                        spawnVfx(swingVfx, atk.x + atk.facing * 50, atk.y - atk.height * 0.45, atk.facing < 0, 2, vfxDisplayScale(swingVfx, 160) * MOTION_INTENSITY);
+                    }
+                    triggerScreenShake(hit.shake * MOTION_INTENSITY, isFinisher ? 320 : 120);
+                    triggerHitFlash(def.id as FighterId, isFinisher ? 180 : 80);
+                    if (hit.flashColor) {
+                        world.superFlash = { color: hit.flashColor, until: now + (isFinisher ? 180 : 90) };
+                    }
+                    world.superSequence = markSuperHitDealt(world.superSequence, hit);
+                }
+
+                // Still integrate ragdoll on defender during cinematic
+                const defFloor = isOnPlatform(def, stage);
+                if (def.ragdoll?.active) {
+                    const t = tickRagdoll({
+                        x: def.x, y: def.y, vx: def.vx, vy: def.vy,
+                        grounded: defFloor !== null, floorY: defFloor,
+                        gravity: GRAVITY * FALL_GRAVITY_SCALE, now, ragdoll: def.ragdoll,
+                    });
+                    def = { ...def, x: t.x, y: t.y, vx: t.vx, vy: t.vy, ragdoll: t.ragdoll };
+                }
+
+                if (atkId === "p1") { world.p1 = atk; world.p2 = def; }
+                else { world.p2 = atk; world.p1 = def; }
+
+                if (now >= seq.until) {
+                    world.superSequence = null;
+                    world.superFreeze = null;
+                }
+                worldRef.current = world;
+                draw(world);
+                return;
+            }
+
+            // Legacy single-hit super freeze (fallback)
             if (world.superFreeze) {
                 if (now >= world.superFreeze.damageAt && !world.superFreeze.dealt) {
                     world.superFreeze.dealt = true;
@@ -3368,11 +3608,10 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     const atkId = world.superFreeze.attacker;
                     const atk = atkId === "p1" ? world.p1 : world.p2;
                     const def = atkId === "p1" ? world.p2 : world.p1;
-                    const result = applyDamage(def, atk, atk.moveSet.superDamage, now);
+                    const result = applyDamage(def, atk, atk.moveSet.superDamage, now, "launch", "head");
                     if (atkId === "p1") { world.p1 = result.attacker; world.p2 = result.target; }
                     else { world.p2 = result.attacker; world.p1 = result.target; }
                     const superChar = atkId === "p1" ? p1Pick : p2Pick;
-                    spawnCharAttackEffect(superChar, def.x, def.y - def.height * 0.5, atk.facing < 0);
                     spawnVfx(
                         resolveCombatVfx(superChar?.id ?? atkId, "upSpecial", "hit"),
                         def.x, def.y - def.height * 0.5, false, 2,
@@ -3522,17 +3761,27 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     // Perfect parry check: if target is in counter stance and timing is right
                     const isParrying = target.counterUntil > now;
                     if (isParrying) {
-                        // Deflect projectile back! Recoil the shooter.
+                        // Deflect projectile back! Recoil the shooter into ragdoll.
                         const shooter = updated.owner === "p1" ? nextP1 : nextP2;
-                        const parryKb = calcKnockback(PARRY_RECOIL_DAMAGE, shooter.hp, shooter.maxHp);
+                        const parryKb = calcKnockbackRagdoll(
+                            PARRY_RECOIL_DAMAGE,
+                            shooter.hp,
+                            shooter.maxHp,
+                            "forward",
+                            "body",
+                            DISTANCE_SCALE,
+                        );
+                        const face = updated.vx >= 0 ? 1 : -1;
+                        const ragdoll = beginRagdollFromHit(now, parryKb, face as 1 | -1, "body");
                         const knockedShooter = setState({
                             ...shooter,
                             hp: Math.max(0, shooter.hp - PARRY_RECOIL_DAMAGE),
-                            vx: -updated.vx * 0.5,
-                            vy: parryKb.kbY * 0.5,
+                            vx: -updated.vx * 0.55,
+                            vy: parryKb.kbY * 0.55,
                             stateLockUntil: now + parryKb.hitstun,
                             attackHasConnected: false,
                             moveVariant: "none",
+                            ragdoll,
                         }, shooter.hp <= PARRY_RECOIL_DAMAGE ? "death" : "takeHit", now);
                         if (updated.owner === "p1") nextP1 = knockedShooter;
                         else nextP2 = knockedShooter;
