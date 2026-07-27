@@ -16,8 +16,10 @@ import {
     registerVfxImage,
     makeStripVfx,
     vfxPreferredComposite,
+    isPureCombatVfx,
     type VfxDef,
 } from "@/lib/vfxLibrary";
+// resolveAttackEffectVfx + isPureCombatVfx: pure ObjectStore slash/impact only
 import {
     ANIM_BLEND_MS,
     FIGHTER_MOVE_TUNING,
@@ -179,22 +181,31 @@ const ARENA_WIDTH = 1920;
 const ARENA_HEIGHT = 1080;
 const VIEWPORT_W = 1280;
 const VIEWPORT_H = 720;
-const GRAVITY = 0.75 * 0.63; // 37% slower total (30% + 10%)
+/**
+ * Distance / speed scale — 3× prior production feel (was SPEED_SCALE 0.63).
+ * Applies to run, jump, dash, dodge path, projectiles, and attack reach.
+ */
+const DISTANCE_SCALE = 3;
+const SPEED_SCALE = 0.63 * DISTANCE_SCALE; // ≈1.89
+const GRAVITY = 0.75 * 0.63; // keep jump arc readable (not fully 3× gravity)
 const FALL_GRAVITY_SCALE = 0.80; // characters fall 20% slower than raw gravity
 const GROUND_FRICTION = 0.78;
 const AIR_FRICTION = 0.94;
 const GROUND_ACCEL = 1.8;
 const AIR_ACCEL = 0.9;
-const GROUND_SPEED_MULT = 1.08;
-const AIR_SPEED_MULT = 1.0;
-const SPEED_SCALE = 0.63; // 37% slower global (30% + 10%)
-const PROJECTILE_GRAVITY = GRAVITY * 0.6; // gravity for arcing projectiles
+const GROUND_SPEED_MULT = 1.12;
+const AIR_SPEED_MULT = 1.05;
+const PROJECTILE_GRAVITY = GRAVITY * 0.55;
 const MAX_AIR_JUMPS = 2;
 const PARRY_WINDOW_MS = 180; // tight timing window for perfect parry
-const PARRY_RECOIL_KB = 8; // knockback on successful parry
+const PARRY_RECOIL_KB = 8 * DISTANCE_SCALE; // knockback on successful parry
 const PARRY_RECOIL_DAMAGE = 10; // damage reflected on parry
 const STARTING_STOCKS = 5;
 const RESPAWN_INVULN_MS = 2000;
+/** Melee hitbox reach base (px) — 3× old 80 */
+const ATTACK_REACH_BASE = 80 * DISTANCE_SCALE;
+/** Motion intensity multiplier for trails, VFX scale, shake */
+const MOTION_INTENSITY = 1.35;
 
 // ─── Stage system ────────────────────────────────────────────────
 interface Platform {
@@ -336,16 +347,16 @@ const DODGE_DOUBLE_TAP_MS = 220;   // AA / DD input window
 const SPACE_DOUBLE_TAP_MS = 250;   // spacebar double-tap for rescue roll
 const DOWN_DROP_DOUBLE_TAP_MS = 220; // SS input window
 // AA/DD slide dodge — no roll loop; smooth afterimage fade + full i-frames
-// Distance is 3× the old ~90px quick-dodge so path in front/behind is meaningfully longer
-const DODGE_DURATION_MS = 280;
+// Distance is 3× the previous 270px path (production: long readable slides)
+const DODGE_DURATION_MS = 320;
 const DODGE_LOCK_MS = DODGE_DURATION_MS;
 const DODGE_IFRAME_MS = DODGE_DURATION_MS; // immune for entire slide
 const DODGE_COOLDOWN_MS = 480;
-const DODGE_DISTANCE = 270; // px along horizontal path (3× baseline)
+const DODGE_DISTANCE = 270 * DISTANCE_SCALE; // 810 px path
 const DODGE_SPEED = 13 * SPEED_SCALE; // legacy — rescue / misc still reference
 const DODGE_AIR_SPEED = 14.5 * SPEED_SCALE;
-const DODGE_AFTERIMAGE_LIFE_MS = 240;
-const DODGE_AFTERIMAGE_SPACING = 28; // min px between ghost copies
+const DODGE_AFTERIMAGE_LIFE_MS = 280;
+const DODGE_AFTERIMAGE_SPACING = 22; // denser ghosts at higher speed
 const DROP_THROUGH_LOCK_MS = 140;
 const DROP_THROUGH_IGNORE_MS = 260;
 const DROP_THROUGH_VY = 8;
@@ -1367,20 +1378,20 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         const defaults = getDefaultVfx(fighterKey, slot);
         const swingId = defaults.swing ?? pickMoveVfxId(moveVariant, fighterKey, SWING_VFX_BY_MOVE);
         const swingVfx = getVfxById(swingId);
-        if (swingVfx) {
+        if (swingVfx && isPureCombatVfx(swingVfx)) {
             getVfxImage(swingVfx.id);
             activeEffectsRef.current.push({
                 id: `fx-swing-${now}`,
-                x: next.x + next.facing * 48,
+                x: next.x + next.facing * (48 * DISTANCE_SCALE * 0.45),
                 y: next.y - next.height * 0.45,
                 vfx: swingVfx,
                 hold: 2,
                 frameIndex: 0,
                 frameTick: 0,
-                scale: vfxDisplayScale(swingVfx, 130),
+                scale: vfxDisplayScale(swingVfx, 150) * MOTION_INTENSITY,
                 flip: next.facing < 0,
                 additive: vfxPreferredComposite(swingVfx) !== "source-over",
-                glowColor: "rgba(255,200,140,0.45)",
+                glowColor: "rgba(255,200,140,0.55)",
             });
         }
 
@@ -1428,7 +1439,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 FIGHTER_MOVE_TUNING.projTrailAgeMs,
                 FIGHTER_MOVE_TUNING.projTrailSpacing,
             );
-            const spawnX = actor.x + actor.facing * 40;
+            const spawnX = actor.x + actor.facing * (40 * DISTANCE_SCALE * 0.5);
             const spawnY = actor.y - actor.height * 0.45;
             pushTrailSample(trail, spawnX, spawnY, velocityAngle(vx, vy), now);
             const projectile: Projectile = {
@@ -1446,7 +1457,7 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 hasGravity,
                 radius: 14,
                 damage: actor.moveSet.projectileDamage,
-                expiresAt: now + 2200,
+                expiresAt: now + 2800,
                 trail,
                 isMagic: !isPhysical,
             };
@@ -1465,10 +1476,10 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     hold: 2,
                     frameIndex: 0,
                     frameTick: 0,
-                    scale: vfxDisplayScale(muzzle, isPhysical ? 90 : 110),
+                    scale: vfxDisplayScale(muzzle, isPhysical ? 100 : 120) * MOTION_INTENSITY,
                     flip: actor.facing < 0,
                     additive: !isPhysical,
-                    glowColor: isPhysical ? "rgba(255,220,120,0.55)" : "rgba(140,220,255,0.65)",
+                    glowColor: isPhysical ? "rgba(255,220,120,0.65)" : "rgba(140,220,255,0.75)",
                 });
             }
 
@@ -1710,20 +1721,20 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
         const fighterKey = charDef?.id ?? fighterId;
         const defaults = getDefaultVfx(fighterKey, "dashAttack");
         const swingVfx = getVfxById(defaults.swing ?? pickMoveVfxId("dash", fighterKey, SWING_VFX_BY_MOVE));
-        if (swingVfx) {
+        if (swingVfx && isPureCombatVfx(swingVfx)) {
             getVfxImage(swingVfx.id);
             activeEffectsRef.current.push({
                 id: `fx-dash-${now}`,
-                x: next.x + next.facing * 40,
+                x: next.x + next.facing * (40 * DISTANCE_SCALE * 0.45),
                 y: next.y - next.height * 0.4,
                 vfx: swingVfx,
                 hold: 2,
                 frameIndex: 0,
                 frameTick: 0,
-                scale: vfxDisplayScale(swingVfx, 120),
+                scale: vfxDisplayScale(swingVfx, 140) * MOTION_INTENSITY,
                 flip: next.facing < 0,
                 additive: vfxPreferredComposite(swingVfx) !== "source-over",
-                glowColor: "rgba(255,180,80,0.4)",
+                glowColor: "rgba(255,180,80,0.55)",
             });
         }
         if (fighterId === "p1") world.p1 = next; else world.p2 = next;
@@ -2731,9 +2742,9 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                     if (!isAttacking) continue;
                     const charDef = f.id === 'p1' ? p1Pick : p2Pick;
                     const variantReachMul = f.moveVariant === 'dash' ? 1.3 : f.moveVariant === 'upSpecial' ? 1.15 : 1;
-                    const atkReach = (charDef?.renderScaleX ?? 1) * 80 * variantReachMul;
+                    const atkReach = (charDef?.renderScaleX ?? 1) * ATTACK_REACH_BASE * variantReachMul;
                     const weaponBox = {
-                        x: f.x + f.facing * 30 - (f.facing > 0 ? 0 : atkReach),
+                        x: f.x + f.facing * (30 * DISTANCE_SCALE) - (f.facing > 0 ? 0 : atkReach),
                         y: f.y - f.height * 0.78,
                         w: atkReach,
                         h: f.height * 0.5,
@@ -3155,7 +3166,22 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 x += pushDir * (pushAmount * 0.5 + 0.01);
             }
 
-            const facing = opponent.x >= x ? 1 : -1;
+            // Face the direction you walk (L/R), not always the opponent.
+            // When idle / attacking locked, face the opponent for combat readability.
+            const moveDir = leftPressed === rightPressed ? 0 : (leftPressed ? -1 : 1);
+            let facing: 1 | -1 = fighter.facing;
+            if (!isLocked && fighter.hp > 0) {
+                if (moveDir !== 0) {
+                    facing = moveDir as 1 | -1;
+                } else {
+                    facing = opponent.x >= x ? 1 : -1;
+                }
+            } else if (isLocked && (fighter.state === "attack" || fighter.state === "attack2" || fighter.state === "special")) {
+                // Keep attack facing frozen (set at startup) — don't spin mid-swing
+                facing = fighter.facing;
+            } else if (!isLocked) {
+                facing = opponent.x >= x ? 1 : -1;
+            }
             const grounded = floorY !== null;
             let next = {
                 ...fighter,
@@ -3174,10 +3200,13 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
                 return setState(next, "death", now);
             }
 
+            // Walk threshold scales with SPEED_SCALE so run anim starts early on L/R
+            const walkThresh = Math.max(0.9, 1.2 * (SPEED_SCALE / 1.89));
             if (now >= next.stateLockUntil) {
                 if (!grounded && next.vy !== 0) {
                     next = { ...setState(next, next.vy < 0 ? "jump" : "fall", now), moveVariant: "none", attackHasConnected: false, dodgeStartX: 0, dodgeEndX: 0 };
-                } else if (Math.abs(next.vx) > 1.4) {
+                } else if (Math.abs(next.vx) > walkThresh || moveDir !== 0) {
+                    // Holding L/R plays walk even while still accelerating
                     next = { ...setState(next, "run", now), moveVariant: "none", attackHasConnected: false, dodgeStartX: 0, dodgeEndX: 0 };
                 } else {
                     next = { ...setState(next, "idle", now), moveVariant: "none", attackHasConnected: false, dodgeStartX: 0, dodgeEndX: 0 };
@@ -3203,9 +3232,9 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             // Attack hitbox scales with character render size
             const charDef = attacker.id === "p1" ? p1Pick : p2Pick;
             const variantReachMul = attacker.moveVariant === "dash" ? 1.3 : attacker.moveVariant === "upSpecial" ? 1.15 : 1;
-            const atkReach = (charDef?.renderScaleX ?? 1) * 80 * variantReachMul;
+            const atkReach = (charDef?.renderScaleX ?? 1) * ATTACK_REACH_BASE * variantReachMul;
             const hitBox = {
-                x: attacker.x + attacker.facing * 30 - (attacker.facing > 0 ? 0 : atkReach),
+                x: attacker.x + attacker.facing * (30 * DISTANCE_SCALE) - (attacker.facing > 0 ? 0 : atkReach),
                 y: attacker.y - attacker.height * 0.78,
                 w: atkReach,
                 h: attacker.height * 0.5,
@@ -3245,29 +3274,38 @@ export default function GrudgeFighter2D({ onBack }: GrudgeFighter2DProps) {
             // Sound
             playSound(headHit ? "hit_head" : attacker.moveVariant === "dash" ? "hit_heavy" : "hit_light");
 
-            // Character attack strip + hit VFX at impact point
+            // Pure ObjectStore slash/impact only — never character body sheets (dwarf etc.)
             const atkChar = attacker.id === "p1" ? p1Pick : p2Pick;
             const hitX = defender.x;
             const hitY = defender.y - defender.height * 0.5;
-            spawnCharAttackEffect(atkChar, hitX, hitY, attacker.facing < 0);
+            // Optional split-effect strip if it's pure FX (not a race body sheet)
+            if (atkChar?.attackEffect) {
+                const strip = resolveAttackEffectVfx(atkChar.attackEffect.src, atkChar.attackEffect.frames);
+                if (isPureCombatVfx(strip)) {
+                    spawnCharAttackEffect(atkChar, hitX, hitY, attacker.facing < 0);
+                }
+            }
 
             const fighterKey = atkChar?.id ?? attacker.id;
             const hitVfx = resolveCombatVfx(fighterKey, attacker.moveVariant, "hit");
-            spawnVfx(hitVfx, hitX, hitY, false, 2, hitVfx ? vfxDisplayScale(hitVfx, 100) : undefined);
-            // Swing smear at attacker weapon arc (if not already played at startup)
+            const hitScale = hitVfx
+                ? vfxDisplayScale(hitVfx, 120) * MOTION_INTENSITY
+                : undefined;
+            spawnVfx(hitVfx, hitX, hitY, false, 2, hitScale);
+            // Swing smear at attacker weapon arc
             const swingVfx = resolveCombatVfx(fighterKey, attacker.moveVariant, "swing");
             spawnVfx(
                 swingVfx,
-                attacker.x + attacker.facing * 40,
+                attacker.x + attacker.facing * (40 * DISTANCE_SCALE),
                 attacker.y - attacker.height * 0.5,
                 attacker.facing < 0,
                 2,
-                swingVfx ? vfxDisplayScale(swingVfx, 130) : undefined,
+                swingVfx ? vfxDisplayScale(swingVfx, 150) * MOTION_INTENSITY : undefined,
             );
 
-            // Screen shake and hit flash — stronger on headshots
-            const baseShake = attacker.moveVariant === "dash" ? 11 : attacker.moveVariant === "upSpecial" ? 12 : 8;
-            triggerScreenShake(headHit ? baseShake + 3 : result.wasCounter ? 12 : baseShake, result.wasCounter ? 220 : 140);
+            // Screen shake and hit flash — intensity-scaled
+            const baseShake = (attacker.moveVariant === "dash" ? 11 : attacker.moveVariant === "upSpecial" ? 12 : 8) * MOTION_INTENSITY;
+            triggerScreenShake(headHit ? baseShake + 4 : result.wasCounter ? 14 * MOTION_INTENSITY : baseShake, result.wasCounter ? 240 : 150);
             triggerHitFlash(defender.id as FighterId, 100);
 
             return {

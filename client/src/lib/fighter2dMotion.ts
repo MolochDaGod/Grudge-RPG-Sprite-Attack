@@ -147,13 +147,13 @@ export function velocityAngle(vx: number, vy: number): number {
  * Stretch factors for motion feel: longer along travel axis when fast.
  * Returns { sx, sy } multipliers for a square projectile sprite.
  */
-export function velocityStretch(speed: number, base = 1, maxStretch = 1.55, soft = 14): {
+export function velocityStretch(speed: number, base = 1, maxStretch = 1.9, soft = 18): {
   sx: number;
   sy: number;
 } {
   const t = clamp(speed / soft, 0, 1);
   const along = lerp(base, maxStretch, t * t);
-  const across = lerp(base, 0.72, t * 0.85);
+  const across = lerp(base, 0.65, t * 0.9);
   return { sx: along, sy: across };
 }
 
@@ -282,19 +282,19 @@ export function drawGhostSilhouette(
 // ─── Movement tuning presets (fighting-game feel) ────────────────
 
 export const FIGHTER_MOVE_TUNING = {
-  /** Higher = snappier ground start/stop */
-  groundLambda: 16,
-  airLambda: 7,
+  /** Higher = snappier ground start/stop (intensity) */
+  groundLambda: 22,
+  airLambda: 10,
   /** Extra friction when releasing keys (helps stop without skating) */
-  groundStopLambda: 20,
-  airStopLambda: 5,
-  /** Run anim speed scales with |vx| / maxSpeed */
-  runFrameSpeedMin: 0.65,
-  runFrameSpeedMax: 1.45,
+  groundStopLambda: 26,
+  airStopLambda: 7,
+  /** Run anim speed scales with |vx| / maxSpeed — punchier at full tilt */
+  runFrameSpeedMin: 0.75,
+  runFrameSpeedMax: 1.85,
   /** Projectile trail */
-  projTrailSamples: 7,
-  projTrailAgeMs: 120,
-  projTrailSpacing: 12,
+  projTrailSamples: 10,
+  projTrailAgeMs: 160,
+  projTrailSpacing: 10,
   /** Skill FX composite */
   skillBlend: "lighter" as FxBlendMode,
   impactBlend: "screen" as FxBlendMode,
